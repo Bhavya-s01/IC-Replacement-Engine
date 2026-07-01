@@ -1,0 +1,1 @@
+"""IC Scraper plugin package."""
