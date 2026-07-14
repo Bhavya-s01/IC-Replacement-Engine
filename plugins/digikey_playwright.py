@@ -1,88 +1,113 @@
-"""Playwright + Edge scraper for DigiKey - v5 pagination fixed."""
+"""Playwright + Edge scraper for DigiKey - Final clean build."""
 
 from __future__ import annotations
-
-import csv
-import logging
-import os
-import re
-import sys
-import time
+import logging, os, re, sys, time
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from playwright.sync_api import (
-    Browser, BrowserContext, Page, Playwright,
-    sync_playwright, TimeoutError as PwTimeout,
-)
-
+from playwright.sync_api import sync_playwright
 from plugins.base import PluginBase
 from models import Component
-from config import (
-    CATEGORIES, DIGIKEY_BASE, DOWNLOAD_DIR,
-    EDGE_CHANNEL, HEADLESS_MODE, MAX_RETRIES,
-    PAGE_LOAD_TIMEOUT_MS, REQUEST_DELAY_SECONDS,
-)
+from config import (CATEGORIES, DIGIKEY_BASE, DOWNLOAD_DIR, EDGE_CHANNEL,
+                    HEADLESS_MODE, MAX_RETRIES, PAGE_LOAD_TIMEOUT_MS,
+                    REQUEST_DELAY_SECONDS)
+from utils.rate_limiter import AdaptiveRateLimiter
+from utils.price_parser import parse_price_breaks, price_breaks_to_json
 
 log = logging.getLogger(__name__)
 
-
+# ═══════════════════════════════════════════════════════
+# DigiKey filter page URLs per category
+# Each URL goes directly to a parametric product table.
+# ═══════════════════════════════════════════════════════
 CATEGORY_URLS = {
-    "power_ic": [
-        "/en/products/filter/integrated-circuits-ics/pmic-voltage-regulators-linear/699",
+    # Power Management
+    "dcdc_converter": [
         "/en/products/filter/integrated-circuits-ics/pmic-voltage-regulators-dc-dc-switching-regulators/749",
         "/en/products/filter/integrated-circuits-ics/pmic-voltage-regulators-dc-dc-switching-controllers/750",
+    ],
+    "ldo_ic": [
+        "/en/products/filter/integrated-circuits-ics/pmic-voltage-regulators-linear/699",
+    ],
+    "gate_driver": [
         "/en/products/filter/integrated-circuits-ics/pmic-gate-drivers/731",
-        "/en/products/filter/integrated-circuits-ics/pmic-battery-management/726",
-        "/en/products/filter/integrated-circuits-ics/pmic-led-drivers/735",
-        "/en/products/filter/integrated-circuits-ics/pmic-voltage-reference/732",
-        "/en/products/filter/integrated-circuits-ics/pmic-power-distribution-switches-load-drivers/752",
+    ],
+    "power_sequencer": [
         "/en/products/filter/integrated-circuits-ics/pmic-supervisors/753",
-        "/en/products/filter/integrated-circuits-ics/pmic-motor-drivers-controllers/740",
-        "/en/products/filter/integrated-circuits-ics/pmic-ac-dc-converters-offline-switchers/751",
-        "/en/products/filter/integrated-circuits-ics/pmic-hot-swap-controllers/733",
-        "/en/products/filter/integrated-circuits-ics/pmic-current-regulation-management/739",
-        "/en/products/filter/integrated-circuits-ics/pmic-or-controllers-ideal-diodes/737",
-        "/en/products/filter/integrated-circuits-ics/pmic-full-half-bridge-drivers/730",
         "/en/products/filter/integrated-circuits-ics/pmic-power-management-specialized/755",
     ],
-    "memory_ic": [
-        "/en/products/filter/integrated-circuits-ics/memory/774",
+    "battery_management": [
+        "/en/products/filter/integrated-circuits-ics/pmic-battery-management/726",
     ],
-    "flash_ic": [
-        "/en/products/filter/integrated-circuits-ics/memory/774",
-    ],
-    "scalar_ic": [
-        "/en/products/filter/integrated-circuits-ics/embedded-microcontrollers/685",
-        "/en/products/filter/integrated-circuits-ics/embedded-microprocessors/686",
-        "/en/products/filter/integrated-circuits-ics/embedded-fpgas-field-programmable-gate-array/696",
-        "/en/products/filter/integrated-circuits-ics/embedded-dsps-digital-signal-processors/689",
-    ],
-    "audio_ic": [
-        "/en/products/filter/integrated-circuits-ics/audio-special-purpose/717",
-    ],
+    # Interface
     "usb_ic": [
         "/en/products/filter/integrated-circuits-ics/interface-controllers/771",
         "/en/products/filter/integrated-circuits-ics/interface-specialized/772",
+        "/en/products/filter/integrated-circuits-ics/interface-drivers-receivers-transceivers/770",
     ],
-    "sensor_ic": [
+    "video_interface": [
+        "/en/products/filter/integrated-circuits-ics/interface-specialized/772",
+    ],
+    "serial_interface": [
+        "/en/products/filter/integrated-circuits-ics/interface-controllers/771",
+    ],
+    # Display
+    "display_driver": [
+        "/en/products/filter/integrated-circuits-ics/pmic-led-drivers/735",
+    ],
+    "tcon_video": [
+        "/en/products/filter/integrated-circuits-ics/video-ics/717",
+        "/en/products/filter/integrated-circuits-ics/display-drivers/702",
+        "/en/products/filter/integrated-circuits-ics/embedded-system-design-specific/697",
+    ],  # uses keyword search
+    # Memory
+    "flash_memory": [
+        "/en/products/filter/integrated-circuits-ics/memory/774",
+    ],
+    "eeprom": [
+        "/en/products/filter/integrated-circuits-ics/memory/774",
+    ],
+    "fram_mram_sram": [
+        "/en/products/filter/integrated-circuits-ics/memory/774",
+    ],
+    # Audio
+    "audio_ic": [
+        "/en/products/filter/integrated-circuits-ics/linear-audio-amplifiers/718",
+    ],
+    # Sensors
+    "ambient_light": [
+        "/en/products/filter/sensors-transducers/ambient-light-sensors/539",
+    ],
+    "temp_sensor": [
         "/en/products/filter/sensors-transducers/temperature-sensors-analog-and-digital-output/518",
-        "/en/products/filter/sensors-transducers/magnetic-sensors-hall-effect-digital-switch-linear/519",
-        "/en/products/filter/sensors-transducers/pressure-sensors-transducers/512",
     ],
+    "hall_sensor": [
+        "/en/products/filter/sensors-transducers/magnetic-sensors-hall-effect-digital-switch-linear/519",
+    ],
+    # Protection
     "protection_ic": [
         "/en/products/filter/circuit-protection/tvs-diodes/144",
     ],
-    "mux_logic_ic": [
+    # Logic & Timing
+    "clock_timing": [
+        "/en/products/filter/integrated-circuits-ics/clock-timing-programmable-timers-oscillators/703",
+    ],
+    "logic_mux": [
         "/en/products/filter/integrated-circuits-ics/logic-buffers-drivers-receivers-transceivers/710",
-        "/en/products/filter/integrated-circuits-ics/logic-gates-and-inverters/711",
         "/en/products/filter/integrated-circuits-ics/logic-signal-switches-multiplexers-decoders/716",
         "/en/products/filter/integrated-circuits-ics/logic-translators-level-shifters/712",
     ],
-    "ethernet_ic": [
-        "/en/products/filter/integrated-circuits-ics/interface-ethernet-ics/769",
+    # MCU
+    "mcu_soc": [
+        "/en/products/filter/integrated-circuits-ics/embedded-microcontrollers/685",
     ],
+    # Retimer
+    "retimer_ic": [
+        "/en/products/filter/integrated-circuits-ics/interface-signal-buffers-repeaters-splitters/766",
+        "/en/products/filter/integrated-circuits-ics/interface-specialized/772",
+    ],
+    # Opto
     "opto_ic": [
         "/en/products/filter/isolators/optoisolators-transistor-photovoltaic-output/325",
         "/en/products/filter/isolators/optoisolators-triac-scr-output/326",
@@ -90,674 +115,499 @@ CATEGORY_URLS = {
     ],
 }
 
+# Keyword search fallback for categories that return 0 from URL scraping
+KEYWORD_SEARCH_FALLBACK = {
+    "tcon_video": [
+        "timing controller LCD",
+        "TCON IC",
+        "video scaler IC",
+        "display controller IC",
+        "LVDS to eDP converter",
+    ],
+    "usb_ic": [
+        "USB Type-C controller IC",
+        "USB PD controller",
+        "USB hub controller IC",
+        "USB 3.0 PHY IC",
+    ],
+    "retimer_ic": [
+        "HDMI retimer",
+        "DisplayPort retimer",
+        "USB 3.1 redriver",
+        "PCIe retimer",
+        "HDMI 2.1 repeater",
+    ],
+}
+
+
+# One JS call extracts the entire table
+JS_EXTRACT = """
+() => {
+    const r = { headers: [], rows: [], total: 0 };
+    const m = document.body.innerText.match(/of\\s+([\\d,]+)/);
+    if (m) r.total = parseInt(m[1].replace(/,/g, ''));
+    document.querySelectorAll('thead th').forEach(th => r.headers.push(th.innerText.trim()));
+    document.querySelectorAll('tbody tr').forEach(tr => {
+        const row = { cells: [], links: [] };
+        tr.querySelectorAll('td').forEach(td => {
+            row.cells.push(td.innerText.trim());
+            td.querySelectorAll('a[href]').forEach(a => {
+                const h = a.getAttribute('href') || '';
+                if (h.includes('.pdf') || h.includes('datasheet'))
+                    row.links.push({ t: 'ds', h: h });
+                else if (h.includes('/en/products/detail/'))
+                    row.links.push({ t: 'pd', h: h });
+            });
+        });
+        if (row.cells.length > 3) r.rows.push(row);
+    });
+    return r;
+}
+"""
+
 
 class DigiKeyPlaywrightPlugin(PluginBase):
     name = "digikey_playwright"
 
     def __init__(self):
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._pw = self._browser = self._context = self._page = self._engine = None
+        self._limiter = AdaptiveRateLimiter(base_delay=1.0, max_delay=30.0, cooldown=120.0)
 
-    # ═══════════════════════════════════
-    # LIFECYCLE
-    # ═══════════════════════════════════
+    @property
+    def _should_stop(self):
+        return getattr(self._engine, 'should_stop', False) if self._engine else False
+
+    # ── LIFECYCLE ──────────────────────────────────────
     def setup(self):
-        log.info("Launching Playwright with Microsoft Edge...")
+        log.info("Launching Edge (headless=%s)...", HEADLESS_MODE)
         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(
-            channel=EDGE_CHANNEL,
-            headless=HEADLESS_MODE,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ],
-        )
+            channel=EDGE_CHANNEL, headless=HEADLESS_MODE,
+            args=["--disable-blink-features=AutomationControlled",
+                  "--no-first-run", "--no-default-browser-check"])
         self._context = self._browser.new_context(
-            accept_downloads=True,
-            viewport={"width": 1920, "height": 1080},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
-            ),
-        )
+            accept_downloads=True, viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36 Edg/125.0")
         self._context.set_default_timeout(PAGE_LOAD_TIMEOUT_MS)
         self._page = self._context.new_page()
-
-        log.info("Navigating to DigiKey homepage...")
+        log.info("Opening DigiKey...")
         self._page.goto(DIGIKEY_BASE, wait_until="domcontentloaded")
-        time.sleep(3)
-        self._handle_initial_popups()
-        log.info("Browser ready.")
+        time.sleep(4)
+        self._handle_popups()
+        log.info("Ready.")
 
     def teardown(self):
-        log.info("Shutting down browser...")
+        log.info("Closing browser...")
+        for o in [self._context, self._browser, self._pw]:
+            try:
+                if o: (o.close if hasattr(o, 'close') else o.stop)()
+            except Exception:
+                pass
+
+    # ── POPUPS ─────────────────────────────────────────
+    def _handle_popups(self):
+        p = self._page
+        self._limiter.wait()
+        # Region
+        for s in ["button:has-text('SG')", "a:has-text('SG')",
+                   "button:has-text('Singapore')", "button:has-text('OK')",
+                   "button:has-text('Confirm')", "button:has-text('Go')",
+                   "[data-testid='region-confirm']",
+                   "div[role='dialog'] button:has-text('OK')",
+                   "div[role='dialog'] button:has-text('Confirm')"]:
+            try:
+                e = p.query_selector(s)
+                if e and e.is_visible():
+                    self._limiter.wait()
+            except Exception: continue
+        # Cookie
+        for s in ["button:has-text('Confirm My Choices')",
+                   "button:has-text('Confirm my Choices')",
+                   "button#onetrust-pc-btn-handler",
+                   "button#onetrust-accept-btn-handler",
+                   "button:has-text('Accept All')", "button:has-text('Accept')"]:
+            try:
+                e = p.query_selector(s)
+                if e and e.is_visible():
+                    self._limiter.wait()
+            except Exception: continue
+        # Close
+        for s in ["button[aria-label='Close']", "button.close"]:
+            try:
+                e = p.query_selector(s)
+                self._limiter.wait()
+            except Exception: continue
+        log.info("Popups done.")
+
+    def _clear(self):
         try:
-            if self._context:
-                self._context.close()
-        except Exception:
-            pass
-        try:
-            if self._browser:
-                self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._pw:
-                self._pw.stop()
-        except Exception:
-            pass
-
-    # ═══════════════════════════════════
-    # POPUP HANDLING
-    # ═══════════════════════════════════
-    def _handle_initial_popups(self):
-        page = self._page
-        time.sleep(2)
-
-        for sel in [
-            "button:has-text('United States')",
-            "a:has-text('United States')",
-            "button:has-text('Confirm')",
-            "button:has-text('OK')",
-            "button:has-text('Go')",
-            "[data-testid='region-confirm']",
-            "button[data-testid='header-country-ok']",
-            ".modal button.btn-primary",
-            "div[role='dialog'] button:has-text('OK')",
-            "div[role='dialog'] button:has-text('Continue')",
-        ]:
+            self._page.evaluate("""
+                document.querySelectorAll('#auto-modal-mask,.dk-site__mask,[class*="mask visible"]').forEach(e=>e.remove());
+                document.querySelectorAll('#onetrust-banner-sdk').forEach(e=>e.style.display='none');
+            """)
+        except Exception: pass
+        for s in ["button:has-text('SG')", "button:has-text('OK')",
+                   "button:has-text('Confirm My Choices')", "button:has-text('Confirm')",
+                   "button#onetrust-accept-btn-handler", "button[aria-label='Close']"]:
             try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    log.info("Dismissing region popup: %s", sel)
-                    el.click()
-                    time.sleep(2)
-                    break
-            except Exception:
-                continue
+                e = self._page.query_selector(s)
+                if e and e.is_visible(): e.click(); time.sleep(0.5); break
+            except Exception: continue
 
-        for sel in [
-            "button#onetrust-accept-btn-handler",
-            "button:has-text('Accept All Cookies')",
-            "button:has-text('Accept All')",
-            "button:has-text('Accept')",
-            "button:has-text('I Agree')",
-        ]:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    log.info("Dismissing cookie banner: %s", sel)
-                    el.click()
-                    time.sleep(1)
-                    break
-            except Exception:
-                continue
+    # ── PAGE MANAGEMENT ────────────────────────────────
+    def _alive(self):
+        try: return self._page and not self._page.is_closed() and bool(self._page.title())
+        except Exception: return False
 
-        for sel in ["button[aria-label='Close']", "button.close"]:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    el.click()
-                    time.sleep(1)
-            except Exception:
-                continue
-
-        log.info("Popup handling complete.")
-
-    def _dismiss_popups_quick(self):
-        """Aggressively dismiss any popup that appears - region, cookie, modal."""
-        page = self._page
-
-        # Region / Location popups (these keep coming back)
-        region_selectors = [
-            "button:has-text('United States')",
-            "a:has-text('United States')",
-            "button:has-text('Confirm')",
-            "button:has-text('OK')",
-            "button:has-text('Go')",
-            "[data-testid='region-confirm']",
-            "[data-testid='country-confirm']",
-            "button[data-testid='header-country-ok']",
-            ".modal button.btn-primary",
-            "div[role='dialog'] button:has-text('OK')",
-            "div[role='dialog'] button:has-text('Confirm')",
-            "div[role='dialog'] button:has-text('Continue')",
-            "div[role='dialog'] button:has-text('Go')",
-            # Location / shipping popup
-            "button:has-text('Submit')",
-            "button:has-text('Save')",
-            "button:has-text('Done')",
-        ]
-        for sel in region_selectors:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    log.info("Dismissing popup: %s", sel)
-                    el.click()
-                    time.sleep(1)
-                    break
-            except Exception:
-                continue
-
-        # Cookie consent
-        for sel in ["button#onetrust-accept-btn-handler",
-                     "button:has-text('Accept All')",
-                     "button:has-text('Accept')"]:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    el.click()
-                    time.sleep(0.5)
-                    break
-            except Exception:
-                continue
-
-        # Close any modal/overlay
-        for sel in ["button[aria-label='Close']",
-                     "button.close",
-                     "[data-testid='modal-close']",
-                     "button[aria-label='close']",
-                     ".modal-close"]:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    el.click()
-                    time.sleep(0.5)
-            except Exception:
-                continue
-
-    # ═══════════════════════════════════
-    # PAGE MANAGEMENT
-    # ═══════════════════════════════════
-    def _is_page_alive(self):
-        try:
-            if self._page and not self._page.is_closed():
-                self._page.title()
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _ensure_page(self):
-        if not self._is_page_alive():
-            log.warning("Page crashed. Recreating...")
-            try:
-                self._page = self._context.new_page()
-                self._page.goto(DIGIKEY_BASE, wait_until="domcontentloaded")
-                time.sleep(2)
-                self._handle_initial_popups()
-            except Exception as exc:
-                log.error("Failed to recreate page: %s", exc)
-                raise
+    def _ensure(self):
+        if not self._alive():
+            log.warning("Page dead. Recreating...")
+            self._page = self._context.new_page()
+            self._page.goto(DIGIKEY_BASE, wait_until="domcontentloaded")
+            self._limiter.wait()
 
     def _goto(self, url):
-        self._ensure_page()
-        full_url = url if url.startswith("http") else DIGIKEY_BASE + url
-        for attempt in range(1, MAX_RETRIES + 1):
+        self._ensure()
+        full = url if url.startswith("http") else DIGIKEY_BASE + url
+        for a in range(1, MAX_RETRIES + 1):
             try:
-                self._page.goto(full_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
-                time.sleep(3)
-                self._dismiss_popups_quick()
-                time.sleep(1)
-                self._dismiss_popups_quick()
-                return
-            except Exception as exc:
-                log.warning("Nav attempt %d failed: %s", attempt, exc)
-                if attempt < MAX_RETRIES:
-                    self._ensure_page()
-                    time.sleep(3 * attempt)
-                else:
-                    raise
-
-    # ═══════════════════════════════════
-    # TABLE DETECTION
-    # ═══════════════════════════════════
-    def _wait_for_table(self, timeout=15):
-        page = self._page
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                el = page.query_selector("table")
-                if el and el.is_visible():
-                    return True
-            except Exception:
-                pass
-            time.sleep(1)
+                self._page.goto(full, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+                self._limiter.wait()
+                return True
+            except Exception as x:
+                log.warning("Nav %d: %s", a, str(x)[:60])
+                if a < MAX_RETRIES: self._ensure(); time.sleep(3 * a)
         return False
 
-    # ═══════════════════════════════════
-    # PAGINATION (FIXED - using actual DigiKey selectors)
-    #
-    # DigiKey uses:
-    #   data-testid="btn-page-1"  (page 1, disabled when current)
-    #   data-testid="btn-page-2"  (page 2)
-    #   data-testid="btn-next-page"  (next arrow)
-    #   data-testid="btn-last-page"  (last page arrow)
-    #   Container: [data-testid*="pagination"]
-    #
-    # No per-page dropdown exists. Fixed at 25 per page.
-    # ═══════════════════════════════════
-    def _get_total_results(self):
-        page = self._page
-        try:
-            body_text = page.inner_text("body")
+    def _wait_table(self, t=15):
+        end = time.time() + t
+        while time.time() < end:
+            try:
+                e = self._page.query_selector("table")
+                if e and e.is_visible(): return True
+            except Exception: pass
+            self._limiter.wait()
+        return False
+
+    # ── SET 100 PER PAGE ───────────────────────────────
+    def _set_100(self):
+        p = self._page
+        log.info("Setting 100/page...")
+        self._clear(); time.sleep(0.5)
+        try: p.evaluate("document.querySelectorAll('#auto-modal-mask,.dk-site__mask').forEach(e=>e.remove());")
+        except Exception: pass
+        time.sleep(0.5)
+
+        # Click dropdown
+        dd = None
+        for s in ["[data-testid='per-page-selector'] [role='button']",
+                   "[data-testid='per-page-selector'] [aria-haspopup='listbox']",
+                   "[data-testid='per-page-selector']"]:
+            try:
+                e = p.query_selector(s)
+                if e and e.is_visible(): dd = e; break
+            except Exception: continue
+        if not dd:
+            log.debug("No dropdown."); return False
+        try: dd.click(force=True)
         except Exception:
-            return 0
+            try: p.evaluate("document.querySelector(\"[data-testid='per-page-selector'] [role='button']\")?.click();")
+            except Exception: return False
+        self._limiter.wait()
 
-        for pat in [r"of\s+([\d,]+)\s", r"([\d,]+)\s+Products",
-                    r"([\d,]+)\s+Results", r"Showing.*?of\s+([\d,]+)"]:
-            m = re.search(pat, body_text)
-            if m:
-                count = int(m.group(1).replace(",", ""))
-                if count > 0:
-                    return count
-        return 0
+        # Click 100
+        ok = False
+        for _ in range(3):
+            for strat in [
+                lambda: self._click_option_by_role(p, "100"),
+                lambda: self._click_option_by_dv(p, "100"),
+                lambda: self._click_option_by_li(p, "100"),
+                lambda: self._click_option_by_js(p, "100"),
+            ]:
+                ok = strat()
+                if ok: break
+            if ok: break
+            self._limiter.wait()
 
-    def _get_current_page_number(self):
-        """Find which page button is currently disabled (= current page)."""
-        page = self._page
-        for i in range(1, 200):
-            testid = "btn-page-{}".format(i)
-            try:
-                btn = page.query_selector("[data-testid='{}']".format(testid))
-                if btn and btn.is_disabled():
-                    return i
-            except Exception:
-                break
-        return 1
+        if not ok:
+            log.warning("Could not select 100.")
+            try: p.keyboard.press("Escape")
+            except Exception: pass
+            return False
 
-    def _click_next_page(self):
-        """Click the Next Page button using DigiKey's actual data-testid."""
-        page = self._page
-
-        # Primary: use the exact next-page button
+        log.info("Selected 100. Reloading...")
+        self._limiter.wait()
+        try: p.wait_for_load_state("networkidle", timeout=20_000)
+        except Exception: pass
+        self._limiter.wait()
         try:
-            btn = page.query_selector("[data-testid='btn-next-page']")
-            if btn and btn.is_visible():
-                if btn.is_disabled():
-                    log.info("Next page button is disabled - on last page.")
-                    return False
+            n = len(p.evaluate(JS_EXTRACT).get("rows", []))
+            log.info("Rows on page: %d", n); return n > 25
+        except Exception: return True
 
-                # Check Mui disabled class
-                cls = btn.get_attribute("class") or ""
-                if "Mui-disabled" in cls:
-                    log.info("Next page button has Mui-disabled class - on last page.")
-                    return False
-
-                btn.scroll_into_view_if_needed()
-                time.sleep(0.5)
-                btn.click()
-                log.info("Clicked next page button.")
-                time.sleep(3)
-
-                # Wait for page to load
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception:
-                    pass
-
-                # Dismiss any popups that appeared after navigation
-                time.sleep(1)
-                self._dismiss_popups_quick()
-                time.sleep(REQUEST_DELAY_SECONDS)
-                return True
-        except Exception as exc:
-            log.debug("btn-next-page click failed: %s", exc)
-
-        # Fallback: click the next numbered page button
-        current = self._get_current_page_number()
-        next_num = current + 1
+    def _click_option_by_role(self, p, val):
         try:
-            next_btn = page.query_selector("[data-testid='btn-page-{}']".format(next_num))
-            if next_btn and next_btn.is_visible() and not next_btn.is_disabled():
-                next_btn.scroll_into_view_if_needed()
-                time.sleep(0.5)
-                next_btn.click()
-                log.info("Clicked page %d button.", next_num)
-                time.sleep(3)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception:
-                    pass
-                time.sleep(1)
-                self._dismiss_popups_quick()
-                time.sleep(REQUEST_DELAY_SECONDS)
-                return True
-        except Exception as exc:
-            log.debug("btn-page-%d click failed: %s", next_num, exc)
-
-        log.info("No more pages available.")
+            for o in p.query_selector_all("[role='option']"):
+                if o.inner_text().strip() == val and o.is_visible():
+                    o.click(force=True); return True
+        except Exception: pass
         return False
 
-    # ═══════════════════════════════════
-    # TABLE EXTRACTION
-    # ═══════════════════════════════════
-    def _extract_headers_raw(self):
-        """Get ALL header texts including empty ones for alignment."""
-        page = self._page
-        for sel in ["thead th", "thead td"]:
-            try:
-                cells = page.query_selector_all(sel)
-                if cells and len(cells) > 3:
-                    headers = []
-                    for c in cells:
-                        try:
-                            text = c.inner_text().strip()
-                        except Exception:
-                            text = ""
-                        headers.append(text)
-                    return headers
-            except Exception:
-                continue
-        return []
+    def _click_option_by_dv(self, p, val):
+        try:
+            o = p.query_selector("li[data-value='{}']".format(val))
+            if o and o.is_visible(): o.click(force=True); return True
+        except Exception: pass
+        return False
 
-    def _extract_rows(self, headers, category_slug, subcategory):
-        """
-        Extract components from table rows.
-        
-        DigiKey's "Mfr Part #" cell contains 3 lines:
-            Line 1: MPN
-            Line 2: Description
-            Line 3: Manufacturer
-        """
-        page = self._page
-        components = []
+    def _click_option_by_li(self, p, val):
+        try:
+            for li in p.query_selector_all("li"):
+                if li.inner_text().strip() == val and li.is_visible():
+                    li.click(force=True); return True
+        except Exception: pass
+        return False
 
-        rows = page.query_selector_all("tbody tr")
-        if not rows:
-            return components
+    def _click_option_by_js(self, p, val):
+        try:
+            r = p.evaluate("""(val) => {
+                for (const el of document.querySelectorAll('li,[role="option"]')) {
+                    if (el.innerText.trim() === val && el.offsetParent !== null) {
+                        el.click(); return 'ok';
+                    }
+                } return 'no';
+            }""", val)
+            return r == 'ok'
+        except Exception: return False
 
-        for row_el in rows:
-            try:
-                cells = row_el.query_selector_all("td")
-                if len(cells) < 3:
-                    continue
+    # ── PAGINATION ─────────────────────────────────────
+    def _click_next(self):
+        p = self._page
+        self._clear(); time.sleep(0.3)
+        try:
+            b = p.query_selector("[data-testid='btn-next-page']")
+            if b and b.is_visible() and not b.is_disabled():
+                cls = b.get_attribute("class") or ""
+                if "Mui-disabled" in cls: return False
+                b.scroll_into_view_if_needed(); time.sleep(0.3)
+                self._limiter.wait()
+                try: p.wait_for_load_state("networkidle", timeout=15_000)
+                except Exception: pass
+                self._limiter.wait(); self._clear()
+                return True
+        except Exception: pass
+        # Fallback: numbered button
+        try:
+            for i in range(1, 500):
+                b = p.query_selector("[data-testid='btn-page-{}']".format(i))
+                if b and b.is_disabled():
+                    n = p.query_selector("[data-testid='btn-page-{}']".format(i+1))
+                    if n and n.is_visible() and not n.is_disabled():
+                        n.scroll_into_view_if_needed(); time.sleep(0.3)
+                        self._limiter.wait()
+                        try: p.wait_for_load_state("networkidle", timeout=15_000)
+                        except Exception: pass
+                        self._limiter.wait(); self._clear()
+                        log.info("Page %d.", i+1); return True
+                    return False
+        except Exception: pass
+        return False
 
-                raw = {}
-                for i, cell in enumerate(cells):
-                    try:
-                        text = cell.inner_text().strip()
-                    except Exception:
-                        text = ""
+    # ── EXTRACT & PARSE ────────────────────────────────
+    def _extract(self):
+        self._clear()
+        try: return self._page.evaluate(JS_EXTRACT)
+        except Exception: return {"headers": [], "rows": [], "total": 0}
 
-                    header_name = headers[i] if i < len(headers) else "_col{}".format(i)
-                    raw[header_name] = text
+    def _parse_row(self, headers, row, cat, subcat):
+        cells = row.get("cells", [])
+        links = row.get("links", [])
+        if len(cells) < 3: return None
+        raw = {}
+        for i, t in enumerate(cells):
+            raw[headers[i] if i < len(headers) else "_c{}".format(i)] = t
+        for lnk in links:
+            h = lnk.get("h", "")
+            if h.startswith("/"): h = DIGIKEY_BASE + h
+            raw["_ds" if lnk["t"] == "ds" else "_pd"] = h
 
-                    # Extract links
-                    try:
-                        for a in cell.query_selector_all("a[href]"):
-                            href = a.get_attribute("href") or ""
-                            if not href:
-                                continue
-                            if href.startswith("/"):
-                                href = DIGIKEY_BASE + href
-                            if ".pdf" in href.lower() or "datasheet" in href.lower():
-                                raw["_datasheet_url"] = href
-                            elif "/en/products/detail/" in href:
-                                raw["_product_url"] = href
-                    except Exception:
-                        pass
+        mc = raw.get("Mfr Part #", "")
+        if not mc: return None
+        ln = [l.strip() for l in mc.split("\n") if l.strip()]
+        if not ln: return None
+        mpn, desc, mfr = ln[0], (ln[1] if len(ln)>1 else ""), (ln[2] if len(ln)>2 else "")
 
-                # Parse multi-line "Mfr Part #" cell
-                mpn_cell = raw.get("Mfr Part #", "")
-                if mpn_cell:
-                    lines = [l.strip() for l in mpn_cell.split("\n") if l.strip()]
-                    if len(lines) >= 1:
-                        raw["_parsed_mpn"] = lines[0]
-                    if len(lines) >= 2:
-                        raw["_parsed_description"] = lines[1]
-                    if len(lines) >= 3:
-                        raw["_parsed_manufacturer"] = lines[2]
-
-                # Parse multi-line stock
-                qty_cell = raw.get("Quantity Available", "")
-                if qty_cell:
-                    lines = [l.strip() for l in qty_cell.split("\n") if l.strip()]
-                    if lines:
-                        raw["_parsed_stock"] = lines[0]
-
-                # Parse price
-                price_cell = raw.get("Price", "")
-                if price_cell:
-                    price_match = re.search(r"\$([\d.]+)", price_cell)
-                    if price_match:
-                        raw["_parsed_price"] = price_match.group(1)
-
-                comp = self._row_to_component(raw, category_slug, subcategory)
-                if comp:
-                    components.append(comp)
-
-            except Exception as exc:
-                log.debug("Row extraction error: %s", exc)
-                continue
-
-        return components
-
-    # ═══════════════════════════════════
-    # ROW -> COMPONENT
-    # ═══════════════════════════════════
-    def _row_to_component(self, raw, category_slug, subcategory):
-        mpn = (raw.get("_parsed_mpn") or
-               raw.get("Manufacturer Part Number") or
-               raw.get("MPN") or "").strip()
-        if not mpn:
-            return None
-
-        manufacturer = (raw.get("_parsed_manufacturer") or
-                       raw.get("Manufacturer") or "").strip()
-
-        description = (raw.get("_parsed_description") or
-                      raw.get("Description") or "").strip()
-
-        # Stock
-        stock = 0
-        stock_str = raw.get("_parsed_stock") or raw.get("Quantity Available") or ""
-        if stock_str:
-            stock_clean = re.sub(r"[^\d]", "", stock_str)
-            stock = int(stock_clean) if stock_clean else 0
-
-        # Price
-        price = 0.0
-        price_str = raw.get("_parsed_price") or raw.get("Unit Price") or raw.get("Price") or ""
-        if price_str:
-            price_clean = re.sub(r"[^\d.]", "", price_str)
-            try:
-                price = float(price_clean)
-            except ValueError:
-                pass
-
-        # Package - skip if it says Tape/Reel/Tube (that's packaging, not IC package)
-        package = raw.get("Package / Case") or raw.get("Package") or ""
-        if package and any(kw in package.lower() for kw in ["tape", "reel", "tube", "digi-reel", "bulk"]):
-            package = ""
-
-        # Mounting
-        mounting = ""
-        for k in ["Mounting Type", "Mount Type"]:
-            if k in raw and raw[k]:
-                mounting = raw[k]
-                break
-
-        # Lifecycle
-        lifecycle = ""
-        for k in ["Product Status", "Part Status", "Lifecycle", "Status"]:
-            if k in raw and raw[k]:
-                lifecycle = raw[k]
-                break
-
-        # Everything else -> specs
-        skip_keys = {
-            "", "Mfr Part #", "Manufacturer Part Number", "MPN",
-            "Manufacturer", "Mfr", "Vendor",
-            "Description", "Product Description",
-            "Digi-Key Part Number", "DK Part #",
-            "Quantity Available", "Stock", "In Stock",
-            "Unit Price", "Price",
-            "Package / Case", "Package", "Supplier Device Package",
-            "Mounting Type", "Mount Type",
-            "Product Status", "Part Status", "Lifecycle", "Status",
-            "Tariff Status",
-            "_parsed_mpn", "_parsed_description", "_parsed_manufacturer",
-            "_parsed_stock", "_parsed_price",
-            "_datasheet_url", "_product_url",
-        }
-
-        specs = {}
-        for k, v in raw.items():
-            if k not in skip_keys and not k.startswith("_col") and v and v != "-":
-                specs[k] = v
-
+        stk = 0
+        sq = raw.get("Quantity Available", "")
+        if sq:
+            sc = re.sub(r"[^\d]", "", sq.split("\n")[0])
+            stk = int(sc) if sc else 0
+        prc = 0.0
+        price_breaks_json = "[]"
+        pq = raw.get("Price", "")
+        if pq:
+            breaks = parse_price_breaks(pq)
+            if breaks:
+                prc = breaks[0][1]
+                price_breaks_json = price_breaks_to_json(breaks)
+            else:
+                pm = re.search(r"\$([\d.]+)", pq)
+                if pm:
+                    try: prc = float(pm.group(1))
+                    except ValueError: pass
+        pkg = raw.get("Package / Case") or raw.get("Package") or ""
+        if pkg and any(k in pkg.lower() for k in ["tape","reel","tube","bulk","digi-reel"]): pkg = ""
+        mnt = ""
+        for k in ["Mounting Type","Mount Type"]:
+            if k in raw and raw[k]: mnt = raw[k]; break
+        sts = ""
+        for k in ["Product Status","Part Status"]:
+            if k in raw and raw[k]: sts = raw[k]; break
+        skip = {"","Mfr Part #","Manufacturer","Description","Digi-Key Part Number",
+                "Quantity Available","Stock","Unit Price","Price","Package / Case",
+                "Package","Supplier Device Package","Mounting Type","Mount Type",
+                "Product Status","Part Status","Lifecycle","Status","Tariff Status"}
+        specs = {k: v for k, v in raw.items() if k not in skip and not k.startswith("_") and v and v != "-"}
         return Component(
-            manufacturer_part_number=mpn,
-            manufacturer=manufacturer,
-            digikey_part_number="",
-            description=description,
-            category=category_slug,
-            subcategory=subcategory,
-            datasheet_url=raw.get("_datasheet_url", ""),
-            product_url=raw.get("_product_url", ""),
-            stock=stock,
-            unit_price=price,
-            package=package,
-            mounting_type=mounting,
-            lifecycle_status=lifecycle,
-            source="digikey",
-            raw_specs=specs,
-        )
+            manufacturer_part_number=mpn, manufacturer=mfr,
+            digikey_part_number="", description=desc,
+            category=cat, subcategory=subcat,
+            datasheet_url=raw.get("_ds",""), product_url=raw.get("_pd",""),
+            stock=stk, unit_price=prc, package=pkg,
+            price_breaks=price_breaks_json,
+            mounting_type=mnt, lifecycle_status=sts,
+            source="digikey", raw_specs=specs)
 
-    # ═══════════════════════════════════
-    # SCRAPE ONE URL
-    # ═══════════════════════════════════
-    def _scrape_single_url(self, url, category_slug, subcategory, max_pages=None):
-        self._goto(url)
-        time.sleep(REQUEST_DELAY_SECONDS)
+    # ── SCRAPE ONE SUBCATEGORY ─────────────────────────
+    def _scrape_url(self, url, cat, subcat, max_pages=None):
+        if not self._goto(url): return []
+        if not self._wait_table(): return []
+        self._set_100()
 
-        if not self._wait_for_table(timeout=15):
-            log.warning("No table found on: %s", url)
-            return []
+        data = self._extract()
+        headers = data.get("headers", [])
+        total = data.get("total", 0)
+        rows = data.get("rows", [])
+        per = len(rows) if rows else 25
+        tp = (total // per) + 1 if total else 0
+        log.info("  Total: %d | %d/page | ~%d pages", total, per, tp)
 
-        total = self._get_total_results()
-        log.info("Total results: %d (25 per page, ~%d pages)", total, (total // 25) + 1 if total else 0)
-
-        # Get headers
-        headers = self._extract_headers_raw()
-        if not headers:
-            log.warning("No headers found.")
-            return []
-
-        useful = [h for h in headers if h]
-        log.info("Columns: %s", useful[:6])
-
-        # Paginate and collect
-        all_components = []
-        page_num = 0
-
+        all_c = []
+        pg = errs = 0
         while True:
-            page_num += 1
-            if max_pages and page_num > max_pages:
-                log.info("Reached max_pages=%d, stopping.", max_pages)
-                break
-
-            current = self._get_current_page_number()
-            log.info("  Page %d (DigiKey page %d) - collected %d so far...",
-                     page_num, current, len(all_components))
-
-            comps = self._extract_rows(headers, category_slug, subcategory)
-            log.info("  Extracted %d components from this page.", len(comps))
-
-            if comps and page_num == 1:
+            pg += 1
+            if self._should_stop:
+                log.warning("Stop. Saving %d.", len(all_c)); break
+            if max_pages and pg > max_pages:
+                log.info("max_pages=%d.", max_pages); break
+            if pg > 1:
+                data = self._extract()
+                headers = data.get("headers", headers)
+                rows = data.get("rows", [])
+            if not rows:
+                errs += 1
+                if errs >= 3: break
+                self._limiter.wait()
+            errs = 0
+            comps = [c for r in rows for c in [self._parse_row(headers, r, cat, subcat)] if c]
+            log.info("  Page %d: %d parts (total %d)", pg, len(comps), len(all_c)+len(comps))
+            if pg == 1 and comps:
                 for c in comps[:2]:
-                    log.info("    Sample: %s | %s | stock=%d",
-                             c.manufacturer_part_number,
-                             c.manufacturer,
-                             c.stock)
+                    log.info("    -> %s | %s | stk=%d", c.manufacturer_part_number, c.manufacturer, c.stock)
+            all_c.extend(comps)
+            self._limiter.report_success()
+            if total > 0 and len(all_c) >= total: break
+            if len(comps) < per: break
+            if not self._click_next(): break
+            if not self._alive(): break
+        log.info("  %s: %d parts / %d pages", subcat, len(all_c), pg)
+        return all_c
 
-            all_components.extend(comps)
+    # ── MAIN ───────────────────────────────────────────
+    
+    def _keyword_search(self, keyword, max_pages=3):
+        """Search DigiKey by keyword when category URLs return 0 results."""
+        import urllib.parse
+        encoded = urllib.parse.quote(keyword)
+        url = DIGIKEY_BASE + "/en/products/result?keywords=" + encoded
+        log.info("Keyword search: %s", keyword)
+        try:
+            self._page.goto(url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+            self._limiter.wait()
+            self._clear()
 
-            if not comps:
-                log.info("  Empty page, stopping.")
-                break
+            # Check if we landed on a product listing with a table
+            has_table = self._page.evaluate("""
+                () => {
+                    const table = document.querySelector('table, [data-testid*="data-table"]');
+                    return !!table;
+                }
+            """)
+            if has_table:
+                return url
+            
+            # Check if we landed on a subcategory page with links
+            subcat_link = self._page.evaluate("""
+                () => {
+                    const links = document.querySelectorAll('a[href*="/products/filter/"]');
+                    for (const a of links) {
+                        const text = a.innerText.toLowerCase();
+                        if (text.includes('integrated') || text.includes('ic')) {
+                            return a.getAttribute('href');
+                        }
+                    }
+                    return null;
+                }
+            """)
+            if subcat_link:
+                return subcat_link
 
-            if total > 0 and len(all_components) >= total:
-                log.info("  Collected all %d results.", total)
-                break
+        except Exception as exc:
+            log.debug("Keyword search failed for '%s': %s", keyword, str(exc)[:60])
+        return None
 
-            # NEXT PAGE
-            if not self._click_next_page():
-                break
-
-            if not self._is_page_alive():
-                log.warning("  Page crashed during pagination.")
-                break
-
-            # Wait for table to reload with new data
-            self._wait_for_table(timeout=10)
-
-            # Re-read headers in case columns differ
-            new_headers = self._extract_headers_raw()
-            if new_headers:
-                headers = new_headers
-
-        log.info("Subcategory %s: %d components from %d pages", subcategory, len(all_components), page_num)
-        return all_components
-
-    # ═══════════════════════════════════
-    # MAIN ENTRY
-    # ═══════════════════════════════════
     def scrape_category(self, category_slug, *, max_pages=None):
-        cat = CATEGORIES.get(category_slug)
-        if not cat:
-            log.error("Unknown category: %s", category_slug)
-            return []
-
-        log.info("=" * 60)
-        log.info("SCRAPING: %s", cat.name)
-        log.info("=" * 60)
-
-        urls = CATEGORY_URLS.get(category_slug, [])
-        if not urls:
-            for kw in cat.search_keywords[:3]:
-                urls.append("/en/products/result?keywords=" + kw.replace(" ", "+"))
-
-        log.info("%d subcategories to scrape.", len(urls))
-
-        all_components = []
-        for i, url in enumerate(urls):
-            parts = url.rstrip("/").split("/")
-            subcategory = parts[-2] if len(parts) >= 2 else "subcat_{}".format(i)
-
-            log.info("")
-            log.info("[%d/%d] %s", i + 1, len(urls), subcategory)
-
-            try:
-                self._ensure_page()
-                comps = self._scrape_single_url(url, category_slug, subcategory, max_pages=max_pages)
-                all_components.extend(comps)
-                log.info("[%d/%d] %s -> %d components", i + 1, len(urls), subcategory, len(comps))
-            except Exception as exc:
-                log.error("FAILED %s: %s", subcategory, exc)
+            cat = CATEGORIES.get(category_slug)
+            if not cat: log.error("Unknown: %s", category_slug); return []
+            log.info("=" * 60)
+            log.info("SCRAPING: %s", cat.name)
+            log.info("=" * 60)
+            urls = CATEGORY_URLS.get(category_slug, [])
+            if not urls:
+                for kw in cat.search_keywords[:3]:
+                    urls.append("/en/products/result?keywords=" + kw.replace(" ", "+"))
+            log.info("%d subcats. Ctrl+C = safe stop.", len(urls))
+            from database import Database
+            db = Database()
+            all_c, saved = [], 0
+            for i, url in enumerate(urls):
+                if self._should_stop: break
+                parts = url.rstrip("/").split("/")
+                sub = parts[-2] if len(parts) >= 2 else "s{}".format(i)
+                log.info("\n[%d/%d] %s", i+1, len(urls), sub)
                 try:
-                    self._ensure_page()
-                except Exception:
-                    pass
-                continue
-
-        # Deduplicate
-        seen = set()
-        unique = []
-        for c in all_components:
-            if c.manufacturer_part_number not in seen:
-                seen.add(c.manufacturer_part_number)
-                unique.append(c)
-
-        log.info("")
-        log.info("=" * 60)
-        log.info("DONE: %s -> %d total, %d unique", cat.name, len(all_components), len(unique))
-        log.info("=" * 60)
-        return unique
+                    self._ensure()
+                    comps = self._scrape_url(url, category_slug, sub, max_pages=max_pages)
+                    if comps:
+                        s = db.bulk_upsert(comps); saved += s
+                        log.info("[%d/%d] %s -> %d scraped, %d saved (total %d)", i+1, len(urls), sub, len(comps), s, saved)
+                    all_c.extend(comps)
+                    self._limiter.report_success()
+                except Exception as x:
+                    log.error("FAIL %s: %s", sub, str(x)[:80])
+                    try: self._ensure()
+                    except Exception: pass
+            # Reclassify memory parts into correct subcategory
+            if category_slug in ("eeprom", "flash_memory", "fram_mram_sram"):
+                from utils.memory_classifier import classify_memory_part
+                for comp in all_c:
+                    comp.category = classify_memory_part(comp)
+                log.info("Reclassified %d memory parts by type.", len(all_c))  
+            seen = set()
+            uniq = [c for c in all_c if c.manufacturer_part_number not in seen and not seen.add(c.manufacturer_part_number)]
+            log.info("\n" + "=" * 60)
+            log.info("DONE: %s -> %d unique, %d saved", cat.name, len(uniq), saved)
+            log.info("=" * 60)
+            db.close()
+            return uniq

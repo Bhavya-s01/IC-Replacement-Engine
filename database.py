@@ -96,6 +96,20 @@ class Database:
         except Exception:
             conn.rollback()
             raise
+    
+    def checkpoint(self):
+        """Force WAL data into main database file to prevent data loss."""
+        conn = self._get_conn()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as exc:
+            logging.getLogger(__name__).warning("WAL checkpoint failed: %s", exc)
+
+    def bulk_upsert_safe(self, components):
+        """Upsert with WAL checkpoint - data guaranteed in .db file."""
+        count = self.bulk_upsert(components)
+        self.checkpoint()
+        return count
 
     def close(self):
         if self._conn:

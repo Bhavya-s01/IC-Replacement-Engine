@@ -65,7 +65,7 @@ class IngestionEngine:
                 log.info("  %s", c)
             return len(components)
 
-        count = self.db.bulk_upsert(components)
+        count = self.db.bulk_upsert_safe(components)
         log.info("Stored %d components in database.", count)
         return count
 
@@ -80,6 +80,12 @@ class IngestionEngine:
             except Exception as exc:
                 log.error("Failed to scrape %s: %s", slug, exc, exc_info=True)
                 results[slug] = 0
+        
+        # Remove cross-category duplicates
+        from utils.deduplicator import deduplicate_across_categories
+        removed = deduplicate_across_categories(self.db)
+        if removed:
+            log.info("Removed %d cross-category duplicates.", removed)
 
         log.info("=== Ingestion complete ===")
         for slug, cnt in results.items():

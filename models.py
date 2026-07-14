@@ -37,7 +37,19 @@ class Component:
     substitutes: List[str] = field(default_factory=list)
 
     def price_breaks_json(self):
-        return json.dumps([pb.to_dict() for pb in self.price_breaks])
+        if isinstance(self.price_breaks, str):
+            return self.price_breaks
+        if not self.price_breaks:
+            return "[]"
+        result = []
+        for pb in self.price_breaks:
+            if isinstance(pb, PriceBreak):
+                result.append(pb.to_dict())
+            elif isinstance(pb, dict):
+                result.append(pb)
+            else:
+                result.append(str(pb))
+        return json.dumps(result)
 
     def raw_specs_json(self):
         return json.dumps(self.raw_specs, ensure_ascii=False)
