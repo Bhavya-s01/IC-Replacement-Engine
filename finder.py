@@ -37,10 +37,10 @@ class MatchResult:
     package: str
     mounting_type: str
     lifecycle_status: str
-    stock: int
-    unit_price: float
-    datasheet_url: str
-    product_url: str
+    stock: int = 0
+    unit_price: float = 0.0
+    datasheet_url: str = ""
+    product_url: str = ""
     total_score: float = 0.0
     max_possible_score: float = 0.0
     compatibility_pct: float = 0.0
@@ -82,7 +82,7 @@ class AlternativeFinder:
 
     def _get_conn(self):
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
@@ -200,8 +200,8 @@ class AlternativeFinder:
             package=cand_row["package"] or "",
             mounting_type=cand_row["mounting_type"] or "",
             lifecycle_status=cand_row["lifecycle_status"] or "",
-            stock=cand_row["stock"] or 0,
-            unit_price=cand_row["unit_price"] or 0.0,
+            ##stock=cand_row["stock"] or 0,
+            ##unit_price=cand_row["unit_price"] or 0.0,
             datasheet_url=cand_row["datasheet_url"] or "",
             product_url=cand_row["product_url"] or "",
         )
@@ -247,9 +247,9 @@ class AlternativeFinder:
         total_score += ls; max_score += lm
 
         # Stock
-        sm = rules.stock_weight
-        ss = sm if result.stock > 0 else 0
-        total_score += ss; max_score += sm
+        # sm = rules.stock_weight
+        # ss = sm if result.stock > 0 else 0
+        # total_score += ss; max_score += sm
 
         # Final
         result.total_score = total_score
@@ -350,7 +350,6 @@ class AlternativeFinder:
         )
         return (score, mx)
         
-
     def _score_temperature(self, target_specs, cand_specs, rules):
         mx = rules.temp_weight
         tk = ["Operating Temperature", "Temperature Range"]
@@ -364,6 +363,87 @@ class AlternativeFinder:
         if range_covers(tr, cr):
             return (mx, mx)
         return (mx * 0.3, mx)
+
+    def compare_pinouts(self, mpn1, mpn2):
+        """
+        Download datasheets for two parts and compare their pinouts.
+        Returns (score, details) where score is 0.0-1.0.
+        """
+        from finder_extras.datasheet_parser import DatasheetParser, compare_pinouts
+
+        parser = DatasheetParser()
+
+        part1 = self.lookup(mpn1)
+        part2 = self.lookup(mpn2)
+
+        if not part1 or not part2:
+            return 0.0, {"error": "Part not found"}
+
+        # Check if pinouts are already cached in DB
+        conn = self._get_conn()
+
+        pinout1_json = conn.execute(
+            "SELECT spec_value FROM specifications WHERE component_id = ? AND spec_name = '_pinout_json'",
+            (part1.component_id,)
+        ).fetchone()
+
+        pinout2_json = conn.execute(
+            "SELECT spec_value FROM specifications WHERE component_id = ? AND spec_name = '_pinout_json'",
+            (part2.component_id,)
+        ).fetchone()
+
+        # Pinouts created by the former broad-regex parser have no validation
+        # metadata. Never reuse them for a safety-related comparison.
+        def usable_cache(row):
+            if not row:
+                return False
+            try:
+                data = json.loads(row[0])
+                return data.get("parser_version") == 2 and data.get("valid") is True
+            except (ValueError, TypeError, KeyError):
+                return False
+
+        import json
+        pinout1_json = pinout1_json if usable_cache(pinout1_json) else None
+        pinout2_json = pinout2_json if usable_cache(pinout2_json) else None
+
+        # If not cached, try to extract from datasheets
+        if not pinout1_json and part1.datasheet_url:
+            specs1, pin1 = parser.parse_datasheet(part1.datasheet_url, part1.mpn, part1.package)
+            if pin1.is_valid():
+                conn.execute(
+                    "INSERT OR REPLACE INTO specifications (component_id, spec_name, spec_value) VALUES (?, ?, ?)",
+                    (part1.component_id, "_pinout_json", pin1.to_json())
+                )
+                conn.commit()
+        else:
+            from finder_extras.datasheet_parser import PinoutInfo
+            import json
+            pin1 = PinoutInfo(mpn=part1.mpn, package=part1.package)
+            if pinout1_json:
+                data = json.loads(pinout1_json[0])
+                for pn, pd in data.get("pins", {}).items():
+                    pin1.add_pin(int(pn), pd["name"], pd.get("description", ""))
+
+        if not pinout2_json and part2.datasheet_url:
+            specs2, pin2 = parser.parse_datasheet(part2.datasheet_url, part2.mpn, part2.package)
+            if pin2.is_valid():
+                conn.execute(
+                    "INSERT OR REPLACE INTO specifications (component_id, spec_name, spec_value) VALUES (?, ?, ?)",
+                    (part2.component_id, "_pinout_json", pin2.to_json())
+                )
+                conn.commit()
+        else:
+            from finder_extras.datasheet_parser import PinoutInfo
+            import json
+            pin2 = PinoutInfo(mpn=part2.mpn, package=part2.package)
+            if pinout2_json:
+                data = json.loads(pinout2_json[0])
+                for pn, pd in data.get("pins", {}).items():
+                    pin2.add_pin(int(pn), pd["name"], pd.get("description", ""))
+
+        score, details = compare_pinouts(pin1, pin2)
+        return score, details
 
     # ── DB STATS ───────────────────────────────────
     def stats(self):

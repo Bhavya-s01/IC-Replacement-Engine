@@ -181,6 +181,10 @@ def main():
     sp.add_argument("--limit", type=int, default=10)
     sub.add_parser("stats")
     sub.add_parser("interactive")
+        # Add after the other subparser definitions:
+    sp = sub.add_parser("pinout", help="Compare pinouts of two parts")
+    sp.add_argument("mpn1")
+    sp.add_argument("mpn2")
 
     args = parser.parse_args()
     finder = AlternativeFinder()
@@ -222,6 +226,9 @@ def main():
         print("  {:<30} {:>8}".format("TOTAL", t))
     elif args.command == "interactive":
         cmd_interactive(args)
+
+    elif args.command == "pinout":
+        cmd_pinout(args)
     else:
         parser.print_help()
         print("\n  Quick start:")
@@ -230,6 +237,58 @@ def main():
         print("    python finder_cli.py find MIC5501-3.0YM5-TR")
         print("    python finder_cli.py interactive")
 
+
+    finder.close()
+
+def cmd_pinout(args):
+    """Compare pinouts of two parts using datasheet data."""
+    finder = AlternativeFinder()
+
+    print("\nComparing pinouts: {} vs {}".format(args.mpn1, args.mpn2))
+    print("(This may download datasheets — first run takes longer)\n")
+
+    score, details = finder.compare_pinouts(args.mpn1, args.mpn2)
+
+    print("=" * 60)
+    print("PIN COMPATIBILITY: {:.0f}%".format(score * 100))
+    print("=" * 60)
+
+    status = details.get("status", "unknown")
+    if status == "missing_pinout_data":
+        print("  Could not extract pinout data from datasheets.")
+        print("  Datasheets may not contain machine-readable pin tables.")
+    elif status == "pin_count_mismatch":
+        print("  PIN COUNT MISMATCH!")
+        print("  Target:    {} pins".format(details.get("target_pins")))
+        print("  Candidate: {} pins".format(details.get("candidate_pins")))
+        print("  These parts are NOT pin-compatible.")
+    elif status == "compared":
+        print("  Total pins compared: {}".format(details.get("total_pins")))
+        print("  Matching pins:       {}".format(details.get("matches")))
+        print("  Critical mismatches: {}".format(details.get("critical", 0)))
+        mismatches = details.get("mismatches", [])
+        if not mismatches:
+            print("\n  All validated pin labels match.")
+        else:
+            print("\n  MISMATCHES:")
+            for m in mismatches:
+                print("  Pin {pin}: {target} vs {candidate} ({severity})".format(
+                    pin=m["pin"], target=m["target"],
+                    candidate=m.get("candidate", "?"), severity=m.get("severity", "?")))
+        
+    elif status == "invalid_pinout_data":
+        print("  Could not extract VALIDATED pinout from datasheets.")
+        print("  Target:    {} pins extracted (expected {}, valid={})".format(
+            details.get("target_pins"), details.get("target_expected"), details.get("target_valid")))
+        print("  Candidate: {} pins extracted (expected {}, valid={})".format(
+            details.get("candidate_pins"), details.get("candidate_expected"), details.get("candidate_valid")))
+        print("  Target confidence:    {:.0f}%".format(details.get("target_confidence", 0) * 100))
+        print("  Candidate confidence: {:.0f}%".format(details.get("candidate_confidence", 0) * 100))
+        print("")
+        print("  PDF pin tables are often graphical or multi-column,")
+        print("  making automated text extraction unreliable.")
+        print("  Use 'find <mpn>' for electrical-spec comparison instead.")
+    print("")
     finder.close()
 
 

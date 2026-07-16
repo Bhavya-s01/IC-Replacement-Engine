@@ -33,8 +33,8 @@ class CategoryRules:
     mount_weight: float = 5.0
     temp_weight: float = 4.0
     lifecycle_weight: float = 3.0
-    stock_weight: float = 2.0
-    price_weight: float = 1.0
+    stock_weight: float = 0.0
+    price_weight: float = 0.0
 
 
 # ═══════════════════════════════════════════════════════
