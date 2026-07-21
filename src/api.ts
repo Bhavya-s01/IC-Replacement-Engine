@@ -5,7 +5,6 @@ const API = axios.create({ baseURL: 'http://localhost:8000/api' })
 export const api = {
   dashboard: () => API.get('/dashboard'),
   categories: () => API.get('/categories'),
-  stats: () => API.get('/stats'),
   search: (q: string, limit = 30) =>
     API.get('/search', { params: { q, limit } }),
   lookup: (mpn: string) =>
@@ -22,4 +21,8 @@ export const api = {
     API.get('/top-manufacturers', { params: { limit } }),
   lifecycleSummary: () =>
     API.get('/lifecycle-summary'),
+  stats: () =>
+    API.get('/stats'),
+  matchingRules: () =>
+    API.get('/matching-rules'),
 }
