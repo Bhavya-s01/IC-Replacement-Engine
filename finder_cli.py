@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
-finder_cli.py — Interactive CLI for the IC Alternative Finder.
-
-Usage:
-  python finder_cli.py lookup MIC5501-3.0YM5-TR
-  python finder_cli.py find MIC5501-3.0YM5-TR
-  python finder_cli.py find MIC5501-3.0YM5-TR --top 20
-  python finder_cli.py compare MIC5501-3.0YM5-TR AP2112K-3.3TRG1
-  python finder_cli.py search LDO 3.3V
-  python finder_cli.py stats
-  python finder_cli.py interactive
+finder_cli.py — CLI for IC Alternative Finder.
+Datasheet enrichment happens automatically on every find.
 """
 
 import argparse, logging, sys, os
@@ -20,8 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | 
 
 
 def print_part(part, show_specs=True):
-    print("")
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("  MPN:          {}".format(part.mpn))
     print("  Manufacturer: {}".format(part.manufacturer))
     print("  Description:  {}".format(part.description))
@@ -30,8 +21,6 @@ def print_part(part, show_specs=True):
     print("  Package:      {}".format(part.package))
     print("  Mounting:     {}".format(part.mounting_type))
     print("  Status:       {}".format(part.lifecycle_status))
-    print("  Stock:        {}".format(part.stock))
-    print("  Price:        ${:.4f}".format(part.unit_price))
     if part.datasheet_url:
         print("  Datasheet:    {}".format(part.datasheet_url))
     print("=" * 70)
@@ -43,84 +32,75 @@ def print_part(part, show_specs=True):
     print("")
 
 
-def print_alternatives(target, alternatives):
-    if not alternatives:
-        print("\n  No compatible alternatives found in database.\n")
+def print_alternatives(target, alts):
+    if not alts:
+        print("\n  No compatible alternatives found.\n")
         return
-
     print("\n" + "=" * 95)
     print("  ALTERNATIVES FOR: {} ({})".format(target.mpn, target.description[:50]))
-    print("  Category: {} | {} candidates found".format(target.category, len(alternatives)))
+    print("  Category: {} | {} candidates found".format(target.category, len(alts)))
     print("=" * 95)
 
-    for i, alt in enumerate(alternatives):
+    for i, alt in enumerate(alts):
         di = " [DROP-IN]" if alt.is_drop_in else ""
-        print("")
-        print("  #{} — {} ({:.1f}% compatible){}".format(i + 1, alt.mpn, alt.compatibility_pct, di))
+        print("\n  #{} -- {} ({:.1f}% compatible){}".format(i+1, alt.mpn, alt.compatibility_pct, di))
         print("  " + "-" * 75)
         print("    Manufacturer: {}".format(alt.manufacturer))
         print("    Description:  {}".format(alt.description[:60]))
         print("    Package:      {}".format(alt.package))
-        print("    Mounting:     {}".format(alt.mounting_type))
         print("    Status:       {}".format(alt.lifecycle_status))
-        print("    Stock:        {}   Price: ${:.4f}".format(alt.stock, alt.unit_price))
         print("    Score:        {:.1f} / {:.1f}".format(alt.total_score, alt.max_possible_score))
 
         if alt.spec_scores:
-            print("")
-            print("    {:<35} {:<20} {:<20} {}".format("SPEC", "TARGET", "CANDIDATE", "STATUS"))
+            print("\n    {:<35} {:<20} {:<20} {}".format("SPEC", "TARGET", "CANDIDATE", "STATUS"))
             print("    " + "-" * 85)
             for spec_name, d in sorted(alt.spec_scores.items()):
-                icon = {"MATCH": "OK", "PARTIAL": "~", "CLOSE": "~", "FAIL": "X",
-                        "CAND_MISSING": "?", "TARGET_MISSING": "?",
-                        "BOTH_MISSING": "-", "UNPARSEABLE": "?"}.get(d["status"], "?")
+                icon = {"MATCH":"OK", "PARTIAL":"~", "CLOSE":"~", "FAIL":"X",
+                        "CAND_MISSING":"?", "TARGET_MISSING":"?",
+                        "BOTH_MISSING":"-", "UNPARSEABLE":"?"}.get(d["status"], "?")
                 req = "*" if d.get("required") else " "
-                tv = str(d["target"])[:18]
-                cv = str(d["candidate"])[:18]
                 print("   {}{:<34} {:<20} {:<20} [{}] {:.0f}/{:.0f}".format(
-                    req, spec_name, tv, cv, icon, d["score"], d["max"]))
+                    req, spec_name, str(d["target"])[:18], str(d["candidate"])[:18],
+                    icon, d["score"], d["max"]))
 
+    print("\n  Legend: * = required, OK = match, ~ = partial, X = fail, ? = missing\n")
+
+
+def cmd_pinout(args):
+    finder = AlternativeFinder()
+    print("\nComparing pinouts: {} vs {}".format(args.mpn1, args.mpn2))
+    print("(Downloads datasheets on first run)\n")
+    score, details = finder.compare_pinouts(args.mpn1, args.mpn2)
+    print("=" * 60)
+    print("PIN COMPATIBILITY: {:.0f}%".format(score * 100))
+    print("=" * 60)
+    status = details.get("status", "unknown")
+    if status == "invalid_pinout_data":
+        print("  Could not extract validated pinout from datasheets.")
+        print("  Target:    {} pins (expected {}, valid={})".format(
+            details.get("target_pins"), details.get("target_expected"), details.get("target_valid")))
+        print("  Candidate: {} pins (expected {}, valid={})".format(
+            details.get("candidate_pins"), details.get("candidate_expected"), details.get("candidate_valid")))
+        print("  PDF pin tables are often graphical — use 'find' for electrical comparison.")
+    elif status == "pin_count_mismatch":
+        print("  PIN COUNT MISMATCH!")
+        print("  Target: {} pins  Candidate: {} pins".format(
+            details.get("target_pins"), details.get("candidate_pins")))
+    elif status == "compared":
+        print("  Pins compared: {}  Matches: {}  Critical mismatches: {}".format(
+            details.get("total_pins"), details.get("matches"), details.get("critical_mismatches")))
+        for m in details.get("mismatches", []):
+            print("  Pin {} | {} -> {} | {}".format(m["pin"], m["target"], m.get("candidate","?"), m.get("severity","")))
+    elif status == "missing_pinout_data":
+        print("  Pinout data not available. Use 'find' for electrical comparison.")
     print("")
-    print("  Legend: * = required, OK = match, ~ = partial, X = fail, ? = missing")
-    print("")
-
-
-def print_comparison(a, b):
-    print("\n" + "=" * 100)
-    print("  SIDE-BY-SIDE COMPARISON")
-    print("=" * 100)
-    print("  {:<30} {:<30} {:<30}".format("FIELD", a.mpn, b.mpn))
-    print("  " + "-" * 92)
-    for label, va, vb in [
-        ("Manufacturer", a.manufacturer, b.manufacturer),
-        ("Description", a.description[:28], b.description[:28]),
-        ("Category", a.category, b.category),
-        ("Package", a.package, b.package),
-        ("Mounting", a.mounting_type, b.mounting_type),
-        ("Status", a.lifecycle_status, b.lifecycle_status),
-        ("Stock", str(a.stock), str(b.stock)),
-        ("Price", "${:.4f}".format(a.unit_price), "${:.4f}".format(b.unit_price)),
-    ]:
-        m = "==" if va.lower() == vb.lower() else "!="
-        print("  {:<30} {:<30} {:<30} {}".format(label, va, vb, m))
-
-    all_specs = sorted(set(list(a.specs.keys()) + list(b.specs.keys())))
-    if all_specs:
-        print("\n  {:<30} {:<30} {:<30}".format("SPECIFICATION", a.mpn, b.mpn))
-        print("  " + "-" * 92)
-        for s in all_specs:
-            va = a.specs.get(s, "-")[:28]
-            vb = b.specs.get(s, "-")[:28]
-            m = "==" if va.lower() == vb.lower() else "!="
-            print("  {:<30} {:<30} {:<30} {}".format(s[:28], va, vb, m))
-    print("")
+    finder.close()
 
 
 def cmd_interactive(args):
     finder = AlternativeFinder()
-    print("\n  IC Alternative Finder — Interactive Mode")
+    print("\n  IC Alternative Finder -- Interactive Mode")
     print("  Commands: lookup <mpn>, find <mpn>, compare <mpn1> <mpn2>, search <kw>, stats, quit\n")
-
     while True:
         try:
             inp = input("  >> ").strip()
@@ -129,8 +109,7 @@ def cmd_interactive(args):
         if not inp: continue
         parts = inp.split()
         cmd = parts[0].lower()
-
-        if cmd in ("quit", "exit", "q"):
+        if cmd in ("quit","exit","q"):
             print("  Bye!"); break
         elif cmd == "lookup" and len(parts) >= 2:
             p = finder.lookup(parts[1])
@@ -145,25 +124,34 @@ def cmd_interactive(args):
             else: print("  Not found: {}".format(parts[1]))
         elif cmd == "compare" and len(parts) >= 3:
             a, b = finder.lookup(parts[1]), finder.lookup(parts[2])
-            if a and b: print_comparison(a, b)
+            if a and b:
+                all_specs = sorted(set(list(a.specs.keys()) + list(b.specs.keys())))
+                print("\n  {:<30} {:<30} {:<30}".format("SPEC", a.mpn, b.mpn))
+                print("  " + "-" * 90)
+                for s in all_specs:
+                    va, vb = a.specs.get(s,"-")[:28], b.specs.get(s,"-")[:28]
+                    m = "==" if va.lower()==vb.lower() else "!="
+                    print("  {:<30} {:<30} {:<30} {}".format(s[:28], va, vb, m))
             else:
                 if not a: print("  Not found: {}".format(parts[1]))
                 if not b: print("  Not found: {}".format(parts[2]))
         elif cmd == "search" and len(parts) >= 2:
-            kw = " ".join(parts[1:])
-            for r in finder.search(kw, limit=10):
-                print("  {} | {} | {} | stk={}".format(r.mpn, r.manufacturer, r.category, r.stock))
+            for r in finder.search(" ".join(parts[1:]), limit=10):
+                print("  {} | {} | {} | {}".format(r.mpn, r.manufacturer, r.category, r.lifecycle_status))
         elif cmd == "stats":
             for cat, cnt in sorted(finder.stats().items()):
                 print("  {:<30} {}".format(cat, cnt))
+        elif cmd == "pinout" and len(parts) >= 3:
+            class A: pass
+            a = A(); a.mpn1 = parts[1]; a.mpn2 = parts[2]
+            cmd_pinout(a)
         else:
             t = finder.lookup(inp)
             if t:
                 print_part(t, show_specs=False)
                 alts = finder.find_alternatives(t, top_n=5)
                 print_alternatives(t, alts)
-            else:
-                print("  Not found. Try: lookup <mpn>, find <mpn>, search <kw>, stats, quit")
+            else: print("  Not found. Try: lookup, find, compare, search, stats, pinout, quit")
     finder.close()
 
 
@@ -181,10 +169,7 @@ def main():
     sp.add_argument("--limit", type=int, default=10)
     sub.add_parser("stats")
     sub.add_parser("interactive")
-        # Add after the other subparser definitions:
-    sp = sub.add_parser("pinout", help="Compare pinouts of two parts")
-    sp.add_argument("mpn1")
-    sp.add_argument("mpn2")
+    sp = sub.add_parser("pinout"); sp.add_argument("mpn1"); sp.add_argument("mpn2")
 
     args = parser.parse_args()
     finder = AlternativeFinder()
@@ -198,97 +183,40 @@ def main():
         if t:
             print_part(t, show_specs=False)
             alts = finder.find_alternatives(t, top_n=args.top,
-                                             same_package_only=args.same_package,
-                                             min_compatibility_pct=args.min_compat)
+                same_package_only=args.same_package, min_compatibility_pct=args.min_compat)
             print_alternatives(t, alts)
         else: print("  Not found: {}".format(args.mpn))
     elif args.command == "compare":
         a, b = finder.lookup(args.mpn1), finder.lookup(args.mpn2)
-        if a and b: print_comparison(a, b)
+        if a and b:
+            all_specs = sorted(set(list(a.specs.keys()) + list(b.specs.keys())))
+            print("\n  {:<30} {:<30} {:<30}".format("SPEC", a.mpn, b.mpn))
+            print("  " + "-" * 90)
+            for s in all_specs:
+                va, vb = a.specs.get(s,"-")[:28], b.specs.get(s,"-")[:28]
+                m = "==" if va.lower()==vb.lower() else "!="
+                print("  {:<30} {:<30} {:<30} {}".format(s[:28], va, vb, m))
         else:
             if not a: print("  Not found: {}".format(args.mpn1))
             if not b: print("  Not found: {}".format(args.mpn2))
     elif args.command == "search":
-        kw = " ".join(args.keywords)
-        results = finder.search(kw, limit=args.limit)
-        if not results: print("  No results."); finder.close(); return
-        print("\n  {:<30} {:<25} {:<20} {:>8} {:>10}".format("MPN","MFR","CATEGORY","STOCK","PRICE"))
-        print("  " + "-" * 95)
-        for r in results:
-            print("  {:<30} {:<25} {:<20} {:>8} ${:>9.4f}".format(
-                r.mpn[:28], r.manufacturer[:23], r.category[:18], r.stock, r.unit_price))
+        for r in finder.search(" ".join(args.keywords), limit=args.limit):
+            print("  {:<30} {:<25} {:<20}".format(r.mpn[:28], r.manufacturer[:23], r.category[:18]))
     elif args.command == "stats":
         s = finder.stats(); t = finder.total_parts()
-        print("\n  IC DATABASE STATUS"); print("  " + "-" * 40)
         for cat in sorted(s.keys()):
             print("  {:<30} {:>8}".format(cat, s[cat]))
-        print("  " + "-" * 40)
         print("  {:<30} {:>8}".format("TOTAL", t))
     elif args.command == "interactive":
         cmd_interactive(args)
-
     elif args.command == "pinout":
         cmd_pinout(args)
     else:
         parser.print_help()
         print("\n  Quick start:")
-        print("    python finder_cli.py stats")
-        print("    python finder_cli.py lookup MIC5501-3.0YM5-TR")
         print("    python finder_cli.py find MIC5501-3.0YM5-TR")
         print("    python finder_cli.py interactive")
 
-
-    finder.close()
-
-def cmd_pinout(args):
-    """Compare pinouts of two parts using datasheet data."""
-    finder = AlternativeFinder()
-
-    print("\nComparing pinouts: {} vs {}".format(args.mpn1, args.mpn2))
-    print("(This may download datasheets — first run takes longer)\n")
-
-    score, details = finder.compare_pinouts(args.mpn1, args.mpn2)
-
-    print("=" * 60)
-    print("PIN COMPATIBILITY: {:.0f}%".format(score * 100))
-    print("=" * 60)
-
-    status = details.get("status", "unknown")
-    if status == "missing_pinout_data":
-        print("  Could not extract pinout data from datasheets.")
-        print("  Datasheets may not contain machine-readable pin tables.")
-    elif status == "pin_count_mismatch":
-        print("  PIN COUNT MISMATCH!")
-        print("  Target:    {} pins".format(details.get("target_pins")))
-        print("  Candidate: {} pins".format(details.get("candidate_pins")))
-        print("  These parts are NOT pin-compatible.")
-    elif status == "compared":
-        print("  Total pins compared: {}".format(details.get("total_pins")))
-        print("  Matching pins:       {}".format(details.get("matches")))
-        print("  Critical mismatches: {}".format(details.get("critical", 0)))
-        mismatches = details.get("mismatches", [])
-        if not mismatches:
-            print("\n  All validated pin labels match.")
-        else:
-            print("\n  MISMATCHES:")
-            for m in mismatches:
-                print("  Pin {pin}: {target} vs {candidate} ({severity})".format(
-                    pin=m["pin"], target=m["target"],
-                    candidate=m.get("candidate", "?"), severity=m.get("severity", "?")))
-        
-    elif status == "invalid_pinout_data":
-        print("  Could not extract VALIDATED pinout from datasheets.")
-        print("  Target:    {} pins extracted (expected {}, valid={})".format(
-            details.get("target_pins"), details.get("target_expected"), details.get("target_valid")))
-        print("  Candidate: {} pins extracted (expected {}, valid={})".format(
-            details.get("candidate_pins"), details.get("candidate_expected"), details.get("candidate_valid")))
-        print("  Target confidence:    {:.0f}%".format(details.get("target_confidence", 0) * 100))
-        print("  Candidate confidence: {:.0f}%".format(details.get("candidate_confidence", 0) * 100))
-        print("")
-        print("  PDF pin tables are often graphical or multi-column,")
-        print("  making automated text extraction unreliable.")
-        print("  Use 'find <mpn>' for electrical-spec comparison instead.")
-    print("")
     finder.close()
 
 

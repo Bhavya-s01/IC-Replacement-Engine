@@ -1,8 +1,6 @@
 """
 api.py — FastAPI backend for the IC Alternative Finder.
-Wraps the existing finder.py, database.py, match_rules.py directly.
-
-Run: uvicorn api:app --reload --port 8000
+Run: python -m uvicorn api:app --reload --port 8000
 Docs: http://localhost:8000/docs
 """
 
@@ -26,7 +24,7 @@ log = logging.getLogger("api")
 
 app = FastAPI(
     title="IC Alternative Finder API",
-    description="Find technically compatible IC replacements from a 33,000+ component database",
+    description="Find technically compatible IC replacements",
     version="1.0.0",
 )
 
@@ -43,75 +41,6 @@ db = Database()
 
 
 # ═══════════════════════════════════════════
-# Response Models
-# ═══════════════════════════════════════════
-class CategoryInfo(BaseModel):
-    slug: str
-    name: str
-    description: str
-    count: int
-
-
-class PartSummary(BaseModel):
-    mpn: str
-    manufacturer: str
-    description: str
-    category: str
-    package: str
-    stock: int
-    unit_price: float
-    lifecycle_status: str
-
-
-class PartDetail(BaseModel):
-    mpn: str
-    manufacturer: str
-    description: str
-    category: str
-    subcategory: str
-    package: str
-    mounting_type: str
-    lifecycle_status: str
-    stock: int
-    unit_price: float
-    datasheet_url: str
-    product_url: str
-    specs: Dict[str, str]
-
-
-class AlternativeResult(BaseModel):
-    mpn: str
-    manufacturer: str
-    description: str
-    category: str
-    package: str
-    mounting_type: str
-    lifecycle_status: str
-    stock: int
-    unit_price: float
-    datasheet_url: str
-    product_url: str
-    compatibility_pct: float
-    total_score: float
-    max_possible_score: float
-    is_drop_in: bool
-    spec_scores: dict
-
-
-class CompareResult(BaseModel):
-    part_a: dict
-    part_b: dict
-    all_spec_names: List[str]
-
-
-class DashboardStats(BaseModel):
-    total: int
-    categories: Dict[str, int]
-    category_names: Dict[str, str]
-    lifecycle_breakdown: Dict[str, int]
-
-
-# ═══════════════════════════════════════════
 # Endpoints
 # ═══════════════════════════════════════════
 
@@ -120,9 +49,8 @@ def health():
     return {"status": "ok", "components": finder.total_parts()}
 
 
-@app.get("/api/dashboard", response_model=DashboardStats)
+@app.get("/api/dashboard")
 def get_dashboard():
-    """Full dashboard statistics."""
     counts = finder.stats()
     total = finder.total_parts()
     conn = db._get_conn()
@@ -135,110 +63,120 @@ def get_dashboard():
     for r in rows:
         lifecycle[r["lifecycle_status"]] = r["cnt"]
 
-    return DashboardStats(
-        total=total,
-        categories=counts,
-        category_names={slug: cat.name for slug, cat in CATEGORIES.items()},
-        lifecycle_breakdown=lifecycle,
-    )
+    return {
+        "total": total,
+        "categories": counts,
+        "category_names": {slug: cat.name for slug, cat in CATEGORIES.items()},
+        "lifecycle_breakdown": lifecycle,
+    }
 
 
-@app.get("/api/categories", response_model=List[CategoryInfo])
+@app.get("/api/categories")
 def get_categories():
-    """List all IC categories with part counts."""
     counts = finder.stats()
     result = []
     for slug, cat in CATEGORIES.items():
-        result.append(CategoryInfo(
-            slug=slug, name=cat.name,
-            description=cat.description,
-            count=counts.get(slug, 0),
-        ))
-    result.sort(key=lambda c: c.name)
+        result.append({
+            "slug": slug,
+            "name": cat.name,
+            "description": cat.description,
+            "count": counts.get(slug, 0),
+        })
+    result.sort(key=lambda c: c["name"])
     return result
 
 
-@app.get("/api/search", response_model=List[PartSummary])
+@app.get("/api/search")
 def search_parts(
-    q: str = Query(..., min_length=1, description="Search keyword or MPN"),
+    q: str = Query(..., min_length=1),
     category: Optional[str] = None,
     limit: int = Query(20, le=100),
 ):
-    """Search parts by keyword, MPN, or manufacturer."""
     results = finder.search(q, limit=limit)
     if category:
         results = [r for r in results if r.category == category]
-
     return [
-        PartSummary(
-            mpn=r.mpn, manufacturer=r.manufacturer,
-            description=r.description, category=r.category,
-            package=r.package, stock=r.stock,
-            unit_price=r.unit_price,
-            lifecycle_status=r.lifecycle_status,
-        )
+        {
+            "mpn": r.mpn,
+            "manufacturer": r.manufacturer,
+            "description": r.description,
+            "category": r.category,
+            "package": r.package,
+            "stock": r.stock,
+            "unit_price": r.unit_price,
+            "lifecycle_status": r.lifecycle_status,
+        }
         for r in results
     ]
 
 
-@app.get("/api/lookup/{mpn}", response_model=PartDetail)
+@app.get("/api/lookup/{mpn:path}")
 def lookup_part(mpn: str):
-    """Get full details and specs for a part."""
+    """Get full details — :path allows dots in MPN like ADP122AUJZ-3.0-R7"""
     part = finder.lookup(mpn)
     if not part:
         raise HTTPException(status_code=404, detail="Part not found: {}".format(mpn))
-    return PartDetail(
-        mpn=part.mpn, manufacturer=part.manufacturer,
-        description=part.description, category=part.category,
-        subcategory=part.subcategory, package=part.package,
-        mounting_type=part.mounting_type,
-        lifecycle_status=part.lifecycle_status,
-        stock=part.stock, unit_price=part.unit_price,
-        datasheet_url=part.datasheet_url,
-        product_url=part.product_url, specs=part.specs,
-    )
+    return {
+        "mpn": part.mpn,
+        "manufacturer": part.manufacturer,
+        "description": part.description,
+        "category": part.category,
+        "subcategory": part.subcategory,
+        "package": part.package,
+        "mounting_type": part.mounting_type,
+        "lifecycle_status": part.lifecycle_status,
+        "stock": part.stock,
+        "unit_price": part.unit_price,
+        "datasheet_url": part.datasheet_url,
+        "product_url": part.product_url,
+        "specs": part.specs,
+    }
 
 
-@app.get("/api/alternatives/{mpn}", response_model=List[AlternativeResult])
+@app.get("/api/alternatives/{mpn:path}")
 def find_alternatives(
     mpn: str,
     top_n: int = Query(10, le=50),
     min_compat: float = Query(30.0, ge=0, le=100),
     same_package: bool = False,
 ):
-    """Find compatible alternatives for a part using full spec comparison [3]."""
+    """Find compatible alternatives — :path allows dots in MPN"""
     target = finder.lookup(mpn)
     if not target:
         raise HTTPException(status_code=404, detail="Part not found: {}".format(mpn))
 
     alts = finder.find_alternatives(
-        target, top_n=top_n,
+        target,
+        top_n=top_n,
         min_compatibility_pct=min_compat,
         same_package_only=same_package,
     )
 
     return [
-        AlternativeResult(
-            mpn=a.mpn, manufacturer=a.manufacturer,
-            description=a.description, category=a.category,
-            package=a.package, mounting_type=a.mounting_type,
-            lifecycle_status=a.lifecycle_status,
-            stock=a.stock, unit_price=a.unit_price,
-            datasheet_url=a.datasheet_url,
-            product_url=a.product_url,
-            compatibility_pct=a.compatibility_pct,
-            total_score=a.total_score,
-            max_possible_score=a.max_possible_score,
-            is_drop_in=a.is_drop_in,
-            spec_scores=a.spec_scores,
-        )
+        {
+            "mpn": a.mpn,
+            "manufacturer": a.manufacturer,
+            "description": a.description,
+            "category": a.category,
+            "package": a.package,
+            "mounting_type": a.mounting_type,
+            "lifecycle_status": a.lifecycle_status,
+            "stock": a.stock,
+            "unit_price": a.unit_price,
+            "datasheet_url": a.datasheet_url,
+            "product_url": a.product_url,
+            "compatibility_pct": a.compatibility_pct,
+            "total_score": a.total_score,
+            "max_possible_score": a.max_possible_score,
+            "is_drop_in": a.is_drop_in,
+            "spec_scores": a.spec_scores,
+        }
         for a in alts
     ]
 
 
-@app.get("/api/compare", response_model=CompareResult)
+@app.get("/api/compare")
 def compare_parts(mpn1: str, mpn2: str):
-    """Side-by-side comparison of two parts."""
     a = finder.lookup(mpn1)
     b = finder.lookup(mpn2)
     if not a:
@@ -248,8 +186,8 @@ def compare_parts(mpn1: str, mpn2: str):
 
     all_specs = sorted(set(list(a.specs.keys()) + list(b.specs.keys())))
 
-    return CompareResult(
-        part_a={
+    return {
+        "part_a": {
             "mpn": a.mpn, "manufacturer": a.manufacturer,
             "description": a.description, "category": a.category,
             "package": a.package, "mounting_type": a.mounting_type,
@@ -257,7 +195,7 @@ def compare_parts(mpn1: str, mpn2: str):
             "stock": a.stock, "unit_price": a.unit_price,
             "specs": a.specs,
         },
-        part_b={
+        "part_b": {
             "mpn": b.mpn, "manufacturer": b.manufacturer,
             "description": b.description, "category": b.category,
             "package": b.package, "mounting_type": b.mounting_type,
@@ -265,8 +203,8 @@ def compare_parts(mpn1: str, mpn2: str):
             "stock": b.stock, "unit_price": b.unit_price,
             "specs": b.specs,
         },
-        all_spec_names=all_specs,
-    )
+        "all_spec_names": all_specs,
+    }
 
 
 @app.get("/api/browse")
@@ -277,7 +215,6 @@ def browse_category(
     limit: int = Query(50, le=500),
     offset: int = 0,
 ):
-    """Browse parts in a category with pagination."""
     conn = db._get_conn()
 
     valid_sorts = {
@@ -311,7 +248,6 @@ def browse_category(
 
 @app.get("/api/lifecycle-summary")
 def lifecycle_summary():
-    """Get lifecycle status breakdown for charts."""
     conn = db._get_conn()
     rows = conn.execute(
         "SELECT lifecycle_status, category, COUNT(*) as cnt "
@@ -333,7 +269,7 @@ def lifecycle_summary():
 
 @app.get("/api/top-manufacturers")
 def top_manufacturers(category: Optional[str] = None, limit: int = 15):
-    """Get top manufacturers by part count."""
+    """Top manufacturers by part count — used by Dashboard charts."""
     conn = db._get_conn()
     if category:
         rows = conn.execute(
@@ -351,3 +287,14 @@ def top_manufacturers(category: Optional[str] = None, limit: int = 15):
         ).fetchall()
 
     return [{"manufacturer": r["manufacturer"], "count": r["cnt"]} for r in rows]
+
+
+@app.get("/api/stats")
+def get_stats():
+    counts = finder.stats()
+    total = finder.total_parts()
+    return {
+        "total": total,
+        "categories": counts,
+        "category_names": {slug: cat.name for slug, cat in CATEGORIES.items()},
+    }
