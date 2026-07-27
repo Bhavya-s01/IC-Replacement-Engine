@@ -1,0 +1,258 @@
+ <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><!--[if IE 7 ]><html xmlns="http://www.w3.org/1999/xhtml" xml:lang='en' lang='en' class="ie7"><![endif]--><!--[if IE 8 ]><html xmlns="http://www.w3.org/1999/xhtml" xml:lang='en' lang='en' class="ie8"><![endif]--><!--[if IE 9 ]><html xmlns="http://www.w3.org/1999/xhtml" xml:lang='en' lang='en' class="ie9"><![endif]--><!--[if (gt IE 9)|!(IE)]><!--><html xmlns="http://www.w3.org/1999/xhtml" xml:lang='en' lang='en'><!--<![endif]--><!-- template-body --><head><meta name="norton-safeweb-site-verification"
+          content="jvhicue2pk8c0ep5s96foylp5gdolgjfm3545duikltcayg-n8r-f-wqt3q3ctt9mqhijmgr67p2s1u-qwle8z1vvybsk6zxtzyh2nbtcio75b7587cioydcpx1kph3x"/><meta name="google-site-verification" content="1mDnJ8C5fqlNOd3mmcFldZyuMp218ELZ5n0d6JbyOR4"/><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title></title><meta name="description" content=""/><meta name="keywords" content=""/><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><link rel="stylesheet" type="text/css" media="all" href="/Public/en/css/main.css"/><link rel="stylesheet" type="text/css" media="all"
+          href="/Public/en/css/jquery-theme/ui-lightness/jquery-ui-1.8.14.custom.css"/><link rel="shortcut icon" type="image/ico" href="/Public/en/img/favicon.ico"/><!--[if lte IE 9]><link rel="stylesheet" type="text/css" media="all" href="/Public/css/ie.css"/><![endif]--><link rel="stylesheet" type="text/css" media="print" href="/Public/en/css/print.css"/><link rel="stylesheet" type="text/css" media="all" href="/Public/en/css/forms.css"/><!--[if lte IE 8]><link rel="stylesheet" type="text/css" media="all" href="/Public/css/ie_eng.css"/><![endif]--><script type="text/javascript" src="/Public/en/js/jquery-1.5.1.min.js"></script><script type="text/javascript" src="/Public/en/js/jquery-ui-1.8.11.custom.min.js"></script><!--[if IE 8]><script type="text/javascript" src="/Public/js/selectivizr.js"></script><![endif]--><!--[if IE 8]><script type="text/javascript" src="/Public/js/PIE.js"></script><![endif]--><script type="text/javascript" src="/Public/en/js/main.js"></script><link rel="stylesheet" href="/Public/en/css/alert/tooltipster.bundle.min.css"><link rel="stylesheet" type="text/css" href="/Public/en/css/alert/plugins/tooltipster/sideTip/themes/tooltipster-sideTip-shadow.min.css" /><script type="text/javascript" src="/Public/en/js/alert/jquery.js"></script><script src="/Public/en/js/alert/tooltipster.bundle.js"></script><script type="text/javascript" src="/Public/en/js/alert/tooltipster.bundle.js"></script><script type="text/javascript" src="/Public/en/js/alert/tooltipster-follower.min.js"></script><script type="text/javascript" src="/Public/en/js/alert/tooltipster-discovery.min.js"></script><script>
+        function quit() {
+            $.post("/mysilergy/userquit", function (data) {
+                if (data.status == 1){
+                    window.location.reload();
+                }
+            },'json');
+        }
+
+    </script></head><script>
+function local()
+{
+	window.location.href = 'javascript:history.back(-1);'
+}
+setInterval('local()',3000);
+</script><link rel="stylesheet" type="text/css" media="all" href="/Public/css/parametric.css" /><body class="sub"><div id="container" class="threecol"><!-- global-header --><script type="text/JavaScript" src="/Public/en/js/site.js"></script><style>
+    .ina {
+        float: right;
+        margin-right: 15px;
+        font-weight: bold;
+        font-size: 9px;
+    }
+
+    #navigation {
+        width: 75rem;
+    }
+
+    #breadbar li {
+        display: inline-block;
+    }
+
+    #centerdiv {
+        text-align: right;
+        width: 75rem;
+        margin: 5px auto;
+    }
+
+    #navigation {
+        margin: 5px auto;
+        padding: 0 20px;
+        height: 50px;
+    }
+
+    #navigation li {
+        float: left;
+        position: relative;
+    }
+
+    #navigation>li:hover {
+        background-color: #6D83A1;
+    }
+
+    #navigation>li>div {
+        display: none;
+        position: absolute;
+        top: 50px;
+        left: 0;
+        min-width: 240px;
+        /*min-height: 300px;*/
+        padding: 10px 0;
+        background: #EEEEEE;
+        /*opacity: 0.8;*/
+    }
+    #navigation .mainnav1 >div{
+        min-width: 300px;
+    }
+    #navigation li a span{
+        right: 10px;
+    }
+
+    #navigation>li:hover>div {
+        display: block;
+        color: black;
+    }
+
+    #navigation>li .cat-1 {
+        padding: 10px 20px;
+        cursor: pointer;
+    }
+
+    #navigation>li .cat-1:hover>a {
+        color: #6D83A1;
+        font-weight: bolder;
+    }
+
+    #navigation>li .cat-1:hover {
+        color: #6D83A1;
+    }
+
+    #navigation>li .cat-1>span {
+        float: right;
+    }
+
+    .mainnav1 .cat-1 .cat-2 {
+        display: none;
+        position: absolute;
+        top: 0px;
+        left: 300px;
+        min-width: 320px;
+        /*opacity: 0.8;*/
+        background: #F2F2F2;
+    }
+    .mainnav1 .cat-1 .cat-2 .cat-4
+    {
+        display: none;
+        position: absolute;
+        top: 0px;
+        left: 320px;
+        min-width: 300px;
+        /*opacity: 0.8;*/
+        background: #F2F2F2;
+    }
+    .mainnav2 .cat-1 .cat-2,
+    .mainnav4 .cat-1 .cat-2,
+    .mainnav4 .cat-1 .cat-2 .cat-4
+     {
+        display: none;
+        position: absolute;
+        top: 0px;
+        left: 240px;
+        min-width: 240px;
+        /*opacity: 0.8;*/
+        background: #F2F2F2;
+    }
+
+    .cat-3>span {
+        float: right;
+    }
+
+    .cat-1 .cat-2 div:first-child {
+        padding-top: 20px;
+    }
+
+    .cat-1 .cat-2 div:last-child {
+        padding-bottom: 20px;
+    }
+
+    .cat-1 .cat-2 .cat-4 div:first-child {
+        padding-top: 20px;
+    }
+
+    .cat-1 .cat-2 .cat-4>div {
+        line-height: 20px;
+        padding: 8px 20px;
+        cursor: pointer;
+    }
+
+    .cat-4>div:hover>a {
+        color: #6D83A1;
+        font-weight: bolder;
+    }
+
+    .cat-1 .cat-2>div {
+        line-height: 20px;
+        padding: 8px 20px;
+        cursor: pointer;
+    }
+
+    .cat-2 div a {
+        color: black;
+    }
+
+    .cat-2>div:hover>a {
+        color: #6D83A1;
+        font-weight: bolder;
+    }
+
+    .cat-1 a {
+        color: black;
+        font-size: 15px;
+    }
+</style><style>
+    #header .icon-header{
+        vertical-align: middle;
+        display: inline-block;
+        padding: 32.5px 10px;
+        position: relative;
+    }
+    #header .icon-header img{
+        cursor: pointer;
+    }
+    #header .icon-header ul{
+        top: 70px;left: -12px;width: 80px;right: 0;
+        background-color: #EEEEEE;display: none;
+    }
+    #header .icon-header:hover ul{
+        display: block;z-index: 9999;
+    }
+    #header ul li{
+        float: inherit;
+        padding: inherit;
+        height: 15px;
+        margin: 5px;
+        text-align: center;
+    }
+</style><div id="header"><div class="header_module" style="width: 20%"><!--<img src="/Public/cn/img/logo_cn2.png" alt="Silergy Technology" onclick="location.href='/cn'" style="cursor: pointer">--><img src="/Public/en/img/logo_en2.png" alt="Silergy Technology" onclick="location.href='/'" style="cursor: pointer" width="240" height="97"></div><div class="header_module" style="width: 60%;text-align: center"><form action="javascript:;" id="search-form" style="margin: 33.5px 50px"><fieldset><input name="q" tabindex="1" type="text" placeholder="Search" style="font-size: 15px"/><input class="submit" type="submit" value="search"/></fieldset><input type="hidden" name="__hash__" value="679db4bc25ddbac6a59744378be60750_6cda884432c32b81dc1c89727c8a3aa2" /></form></div><div class="header_module" style="width: 20%;padding-left: 75px;"><div class="icon-header"><img src="/Public/en/img/index/login_y.png" alt="" width="32"><ul style="padding-left: initial;font-size: 10px;z-index: 99;"><li><a href="/mysilergy">Login</a></li></ul></div><div class="icon-header" style="display: none"><img src="/Public/en/img/index/car_y.png" alt="" width="32"></div><div class="icon-header"><img src="/Public/en/img/index/lang_y.png" alt="" width="32"><ul style="padding-left: initial;font-size: 10px;z-index: 99;"><li><a href="/zh">繁體中文</a></li><!--<li><a href="/cn">简体中文</a></li>--></ul></div></div></div><div style="background-color: #004ea2"><!--<div style="background-color: #dddddd">--><ul id="navigation"  style="background-color: #004ea2"><li class="mainnav1"><a href="javascript:;">Products</a><div style=""><div class="cat-1 hover-1"><a href="/classoverview/Low+Dropout+Regulators">Low Dropout Regulators</a><span>></span><div class="cat-2"><div><a href="/list/General+LDOs">General LDOs</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Motor+Drivers">Motor Drivers</a><span>></span><div class="cat-2"><div><a href="/list/Brushed+DC+%28BDC%29+Motor+Drivers">Brushed DC (BDC) Motor Drivers</a></div><div><a href="/list/Brushless+DC+%28BLDC%29+Motor+Drivers">Brushless DC (BLDC) Motor Drivers</a></div><div><a href="/list/Integrated+Control+Motor+Drivers">Integrated Control Motor Drivers</a></div><div><a href="/list/Stepper+Motor+Drivers">Stepper Motor Drivers</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/DC-DC">DC-DC</a><span>></span><div class="cat-2"><div class="cat-3 hover-2"><a href="/classoverview/DC-DC+Converters">DC-DC Converters</a><span>></span><div class="cat-4"><div><a href="/list/Buck">Buck</a></div><div><a href="/list/Boost">Boost</a></div><div><a href="/list/Buck+Boost">Buck Boost</a></div><div><a href="/list/Isolated+DC-DC">Isolated DC-DC</a></div></div></div><div><a href="/list/Controller">Controller</a></div><div><a href="/list/Multiphase+Controller">Multiphase Controller</a></div><div><a href="/list/Smart+Power+Stages+%28SPS%29+%26amp%3B+Dr.+MOS">Smart Power Stages (SPS) &amp; Dr. MOS</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Protection+Switches">Protection Switches</a><span>></span><div class="cat-2"><div><a href="/list/Efuses">Efuses</a></div><div><a href="/list/Hotswap+Controllers">Hotswap Controllers</a></div><div><a href="/list/Oring%26amp%3BIdeal+diodes">Oring&amp;Ideal diodes</a></div><div><a href="/list/Load+Switch">Load Switch</a></div><div class="cat-3 hover-2"><a href="/classoverview/USB+Switches">USB Switches</a><span>></span><div class="cat-4"><div><a href="/list/USB+Type+C">USB Type C</a></div><div><a href="/list/USB+Type+A">USB Type A</a></div></div></div><div><a href="/list/Monitor+and+Reset">Monitor and Reset</a></div><div class="cat-3 hover-2"><a href="/classoverview/Highside+Switches">Highside Switches</a><span>></span><div class="cat-4"><div><a href="/list/Classic+Highside+Switches">Classic Highside Switches</a></div></div></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/AC-DC+Converters">AC-DC Converters</a><span>></span><div class="cat-2"><div><a href="/list/Flyback+Converters">Flyback Converters</a></div><div><a href="/list/Flyback+Controllers">Flyback Controllers</a></div><div><a href="/list/Synchronous+Rectifiers">Synchronous Rectifiers</a></div><div><a href="/list/USB+Protocol">USB Protocol</a></div><div><a href="/list/AC+Input+Buck+Converter">AC Input Buck Converter</a></div><div class="cat-3 hover-2"><a href="/classoverview/PFC+%26amp%3B+LLC">PFC &amp; LLC</a><span>></span><div class="cat-4"><div><a href="/list/PFC+%26amp%3B+LLC+Combo+Controller">PFC &amp; LLC Combo Controller</a></div></div></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Power+over+Ethernet+%28POE%29+ICs">Power over Ethernet (POE) ICs</a><span>></span><div class="cat-2"><div><a href="/list/PD">PD</a></div><div><a href="/list/PSE">PSE</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Gate+Drivers">Gate Drivers</a><span>></span><div class="cat-2"><div><a href="/list/Isolated+Drivers">Isolated Drivers</a></div><div><a href="/list/Non-isolated+Drivers">Non-isolated Drivers</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/LED+Drivers">LED Drivers</a><span>></span><div class="cat-2"><div class="cat-3 hover-2"><a href="/classoverview/AC+LED+Drivers">AC LED Drivers</a><span>></span><div class="cat-4"><div><a href="/list/Phase-cut+dimming">Phase-cut dimming</a></div><div><a href="/list/PFC+CV+stage">PFC CV stage</a></div><div><a href="/list/Non-Dimming+CC">Non-Dimming CC</a></div><div><a href="/list/Smart+Dimming+CC">Smart Dimming CC</a></div><div><a href="/list/Other+AC+LED+Drivers">Other AC LED Drivers</a></div><div><a href="/list/Switching+Solutions">Switching Solutions</a></div></div></div><div class="cat-3 hover-2"><a href="/classoverview/DC+LED+Drivers">DC LED Drivers</a><span>></span><div class="cat-4"><div><a href="/list/Backlight+LED+Drivers">Backlight LED Drivers</a></div><div><a href="/list/Infrared+LED+Drivers">Infrared LED Drivers</a></div><div><a href="/list/Flash+LED+Drivers">Flash LED Drivers</a></div><div><a href="/list/MR16+LED+Drivers">MR16 LED Drivers</a></div><div><a href="/list/Other+DC+LED+Drivers">Other DC LED Drivers</a></div><div><a href="/list/Automotive+LED+Drivers">Automotive LED Drivers</a></div></div></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Power+Modules">Power Modules</a><span>></span><div class="cat-2"><div><a href="/list/Non-isolated+Power+Module">Non-isolated Power Module</a></div><div><a href="/list/Isolated+Power+Module">Isolated Power Module</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Power+Management+ICs+%28PMICs%29">Power Management ICs (PMICs)</a><span>></span><div class="cat-2"><div><a href="/list/Memory+PMIC">Memory PMIC</a></div><div><a href="/list/Display+PMIC">Display PMIC</a></div><div><a href="/list/Auto+PMIC">Auto PMIC</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Battery+Management+ICs">Battery Management ICs</a><span>></span><div class="cat-2"><div><a href="/list/Switching+Charger">Switching Charger</a></div><div><a href="/list/Battery+Fuel+Gauges">Battery Fuel Gauges</a></div><div><a href="/list/Battery+Monitors+and+Balancers">Battery Monitors and Balancers</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Microcontrollers+%26amp%3B+Processor">Microcontrollers &amp; Processor</a><span>></span><div class="cat-2"><div><a href="/list/ARM+Core+Automotive+MCU">ARM Core Automotive MCU</a></div><div><a href="/list/More+Automotive+MCU">More Automotive MCU</a></div><div><a href="/list/Energy+Measurement+ICs">Energy Measurement ICs</a></div><div><a href="/list/Electricity+Metering+ICs">Electricity Metering ICs</a></div><div><a href="/list/Reinforced+Digital+Isolator">Reinforced Digital Isolator</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Speciality+ICs">Speciality ICs</a><span>></span><div class="cat-2"><div><a href="/list/Programming+Logic+Device">Programming Logic Device</a></div><div><a href="/list/Multiple+Switch+Detection+Interface+IC">Multiple Switch Detection Interface IC</a></div><div><a href="/list/Photo-relay">Photo-relay</a></div><div><a href="/list/Digital+Power+Controller">Digital Power Controller</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/ESD%26amp%3BSurge+Protections">ESD&amp;Surge Protections</a><span>></span><div class="cat-2"><div><a href="/list/ESD+Protection">ESD Protection</a></div><div><a href="/list/Surge+Protection">Surge Protection</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Sensors">Sensors</a><span>></span><div class="cat-2"><div><a href="/list/Digital+Light+Sensor">Digital Light Sensor</a></div><div><a href="/list/Analog+Light+Sensor">Analog Light Sensor</a></div><div><a href="/list/Temperature+Sensor">Temperature Sensor</a></div><div><a href="/list/Magnetic+sensors">Magnetic sensors</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Amplifiers">Amplifiers</a><span>></span><div class="cat-2"><div><a href="/list/Current+Sense+Amplifiers">Current Sense Amplifiers</a></div><div><a href="/list/Power+Monitors">Power Monitors</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Voltage+References">Voltage References</a><span>></span><div class="cat-2"><div><a href="/list/Shunt+Voltage+Reference">Shunt Voltage Reference</a></div><div><a href="/list/Series+Voltage+Reference">Series Voltage Reference</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Audio">Audio</a><span>></span><div class="cat-2"><div><a href="/list/Class-D+Amplifier">Class-D Amplifier</a></div><div><a href="/list/Headphone+or+Line+Driver">Headphone or Line Driver</a></div><div><a href="/list/Audio+Converter">Audio Converter</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Data+Converters">Data Converters</a><span>></span><div class="cat-2"><div><a href="/list/Digital-to-analog+Converters+%28DACs%29">Digital-to-analog Converters (DACs)</a></div><div><a href="/list/Analog-to-digital+Converters+%28ADCs%29">Analog-to-digital Converters (ADCs)</a></div></div></div><div class="cat-1 hover-1"><a href="/classoverview/Clocks+%26amp%3B+Timing">Clocks &amp; Timing</a><span>></span><div class="cat-2"><div><a href="/list/Clock+Generator+">Clock Generator </a></div><div><a href="/list/Clock+Buffer">Clock Buffer</a></div></div></div></div></li><li class="mainnav2"><a href="javascript:;">Applications</a><div style=""><div class="cat-1 hover-1"><a href="/useoverview/AI+Data+Center">AI Data Center<span>></span></a><div class="cat-2"><div><a href="/use/Data+Center_Power+Supply">Data Center_Power Supply</a></div><div><a href="/use/DC+input">DC input</a></div><div><a href="/use/AI+Server">AI Server</a></div><div><a href="/use/Optical+Module">Optical Module</a></div><div><a href="/use/Client+SSD">Client SSD</a></div><div><a href="/use/Enterprise+SSD">Enterprise SSD</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Automotive">Automotive<span>></span></a><div class="cat-2"><div><a href="/use/Auto+BMS">Auto BMS</a></div><div><a href="/use/Traction+Inverter">Traction Inverter</a></div><div><a href="/use/Zonal+Control+Unit">Zonal Control Unit</a></div><div><a href="/use/Telematics">Telematics</a></div><div><a href="/use/In-Vehicle+Infotainment+%28IVI%29">In-Vehicle Infotainment (IVI)</a></div><div><a href="/use/HVAC">HVAC</a></div><div><a href="/use/Body+Control">Body Control</a></div><div><a href="/use/Electric+Power+Steering+%28EPS%29">Electric Power Steering (EPS)</a></div><div><a href="/use/Automotive+Front+Light">Automotive Front Light</a></div><div><a href="/use/Automotive+Front+Light-ADB">Automotive Front Light-ADB</a></div><div><a href="/use/Automotive+Rear+Light">Automotive Rear Light</a></div><div><a href="/use/OBC+%26+DC-DC">OBC & DC-DC</a></div><div><a href="/use/ADAS">ADAS</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Communication">Communication<span>></span></a><div class="cat-2"><div><a href="/use/Enterprise+Switch">Enterprise Switch</a></div><div><a href="/use/Small+Cell">Small Cell</a></div><div><a href="/use/Video+Conference+System">Video Conference System</a></div><div><a href="/use/Communication+Power+">Communication Power </a></div><div><a href="/use/WLAN+AP">WLAN AP</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/AC-DC+Power+Supply">AC-DC Power Supply<span>></span></a><div class="cat-2"><div><a href="/use/AC-DC+Fast+Charger+">AC-DC Fast Charger </a></div><div><a href="/use/Small+Appliance+Adapter">Small Appliance Adapter</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Building+Automation">Building Automation<span>></span></a><div class="cat-2"><div><a href="/use/IP+Camera">IP Camera</a></div><div><a href="/use/Video+Matrix">Video Matrix</a></div><div><a href="/use/Electronic+Smart+lock+">Electronic Smart lock </a></div><div><a href="/use/IoT+Module">IoT Module</a></div><div><a href="/use/Elevator+Control+System">Elevator Control System</a></div><div><a href="/use/LED+Wall+Control">LED Wall Control</a></div><div><a href="/use/Power+Meter">Power Meter</a></div><div><a href="/use/Smart+Relay_Dimmer">Smart Relay_Dimmer</a></div><div><a href="/use/Smart+Socket_Outlet">Smart Socket_Outlet</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Computing">Computing<span>></span></a><div class="cat-2"><div><a href="/use/Desktop">Desktop</a></div><div><a href="/use/Notebook">Notebook</a></div><div><a href="/use/Server+">Server </a></div><div><a href="/use/Notebook+Docking+Station+">Notebook Docking Station </a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Consumer+Electronic">Consumer Electronic<span>></span></a><div class="cat-2"><div><a href="/use/notebook">notebook</a></div><div><a href="/use/Set+Top+Box">Set Top Box</a></div><div><a href="/use/Tablet+PC">Tablet PC</a></div><div><a href="/use/Power+Bank">Power Bank</a></div><div><a href="/use/Smartwatch">Smartwatch</a></div><div><a href="/use/Smartphone">Smartphone</a></div><div><a href="/use/Smart+Speaker">Smart Speaker</a></div><div><a href="/use/True+Wireless+Stereo+%28TWS%29">True Wireless Stereo (TWS)</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Electric+Bicycle">Electric Bicycle<span>></span></a><div class="cat-2"><div><a href="/use/E-Bike+VCU+">E-Bike VCU </a></div><div><a href="/use/Industrial+Battery+Pack">Industrial Battery Pack</a></div><div><a href="/use/GPS+Reciever">GPS Reciever</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Electronic+Payment">Electronic Payment<span>></span></a><div class="cat-2"><div><a href="/use/Point+of+Sale+terminal">Point of Sale terminal</a></div><div><a href="/use/Barcode+Scanner+">Barcode Scanner </a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Energy+Storage+System+%28ESS%29">Energy Storage System (ESS)<span>></span></a><div class="cat-2"><div><a href="/use/ESS+BMU">ESS BMU</a></div><div><a href="/use/ESS+PCS">ESS PCS</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Factory+Automation">Factory Automation<span>></span></a><div class="cat-2"><div><a href="/use/Industrial+Control+Computer">Industrial Control Computer</a></div><div><a href="/use/HMI">HMI</a></div><div><a href="/use/Distributed+Control+System+">Distributed Control System </a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/HEA">HEA<span>></span></a><div class="cat-2"><div><a href="/use/Smart+TV">Smart TV</a></div><div><a href="/use/Vacuum+Robot">Vacuum Robot</a></div><div><a href="/use/Air+Conditioner">Air Conditioner</a></div><div><a href="/use/Refrigerator">Refrigerator</a></div><div><a href="/use/Washing+Machine">Washing Machine</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/LED+Lighting">LED Lighting<span>></span></a><div class="cat-2"><div><a href="/use/Stage+Light">Stage Light</a></div><div><a href="/use/AC-DC+Lighting">AC-DC Lighting</a></div><div><a href="/use/Intelligent+Lighting">Intelligent Lighting</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Medical">Medical<span>></span></a><div class="cat-2"><div><a href="/use/Patient+Monitor">Patient Monitor</a></div><div><a href="/use/Pulse+Oximeter">Pulse Oximeter</a></div><div><a href="/use/Oxygen+Generator">Oxygen Generator</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Motor%26Power+Control">Motor&Power Control<span>></span></a><div class="cat-2"><div><a href="/use/Servo">Servo</a></div><div><a href="/use/Inverter">Inverter</a></div><div><a href="/use/Power+Tools">Power Tools</a></div><div><a href="/use/UPS">UPS</a></div><div><a href="/use/EV+Charger">EV Charger</a></div><div><a href="/use/Brick+Module+Power">Brick Module Power</a></div><div><a href="/use/Portable+Power+Station">Portable Power Station</a></div></div></div><div class="cat-1 hover-1"><a href="/useoverview/Power+Automation">Power Automation<span>></span></a><div class="cat-2"><div><a href="/use/Smart+Electricity+Meter">Smart Electricity Meter</a></div><div><a href="/use/Grid+power+Protection">Grid power Protection</a></div><div><a href="/use/PV+Inverter">PV Inverter</a></div><div><a href="/use/AC+Intelligent+Circuit+Breaker">AC Intelligent Circuit Breaker</a></div><div><a href="/use/Solar+Optimizer">Solar Optimizer</a></div><div><a href="/use/Micro+Inverter">Micro Inverter</a></div><div><a href="/use/PV+Module+Monitoring">PV Module Monitoring</a></div><div><a href="/use/TTU">TTU</a></div><div><a href="/use/FTU+%26+DTU">FTU & DTU</a></div><div><a href="/use/Battery+Tester+-+Cells+in+Parallel">Battery Tester - Cells in Parallel</a></div></div></div></div></li><li class="mainnav3"><a href="javascript:;">Design Resources</a><div><div class="cat-1"><a href="/onlinesimulation">Online Simulation</a></div><!--<div class="cat-1"><a href="/design">Reference Design</a></div>--><div class="cat-1"><a href="/quality">Quality & Reliability</a></div><div class="cat-1"><a href="/cross-reference">Cross Reference</a></div><div class="cat-1"><a href="/information-security">Information Security</a></div></div></li><li class="mainnav4"><a href="javascript:;">Investors</a><div><div class="cat-1 hover-1"><a href="javascript:;">Company Management<span>></span></a><div class="cat-2"><div><a href="/company/zhili?id=227">Board of Directors</a></div><div><a href="/company/zhili?id=228">Committees</a></div><div><a href="/company/zhili?id=229">Internal Audit</a></div><div><a href="/company/zhili?id=230">Top 10 Shareholders</a></div><div><a href="/company/zhili?id=240">Communication between independent directors/internal/independent auditors</a></div><div><a href="/company/zhili?id=294">Information Security</a></div></div></div><div class="cat-1 hover-1"><a href="javascript:;">Investor Resource<span>></span></a><div class="cat-2"><div><a href="/news/financial">Financial Information</a></div><div><a href="/company/importinfo">Material Information</a></div><div><a href="/news/investors">IR Events</a></div><div><a href="/company/annals">Annual Reports</a></div><div class="cat-3 hover-2"><a href="javascript:;">Shareholder Services<span>></span></a><div class="cat-4"><div><a href="/company/querystock">Stock Quotes</a></div><div><a href="/company/gudonghui">Shareholders'Meeting</a></div><div><a href="/company/hongli">Dividend Information</a></div><div><a href="/company/index?id=235">Contact</a></div></div></div></div></div><div class="cat-1 hover-1"><a href="/company/textrue">Organizational Structure</a></div><div class="cat-1 hover-1"><a href="javascript:;">Stakeholder Engagement<span>></span></a><div class="cat-2"><div><a href="/feedback/communication">Stakeholder Engagement</a></div><div><a href="/feedback">Stakeholder Feedback</a></div></div></div></div></li><li class="mainnav5"><!--<a href="/news">关于矽力杰</a>--><a href="javascript:;">About Silergy</a><div><div class="cat-1"><a href="/news">Company News</a></div><div class="cat-1"><a href="/company">Company Profile</a></div><div class="cat-1"><a href="/recruitment">Careers</a></div><div class="cat-1"><a href="/contact">Contact Us</a></div><div class="cat-1"><a href="/company/reportAndComplaintEntrance">Whistleblower Complaint</a></div></div></li><!--<li class="mainnav6">--><!--<a href="/recruitment">Careers</a>--><!--</li>--><li class="mainnav7"><a href="/esg">ESG</a><div><!--<div class="cat-1"><a href="/esg/chairman">A Message from the Chairperson</a></div>--><!--<div class="cat-1"><a href="/esg/about">Company Profile</a></div>--><div class="cat-1"><a href="/esg/chairman">A Message from the Chairperson</a></div><div class="cat-1"><a href="/esg/institutionalDocument">Institutional Document</a></div><!--<div class="cat-1"><a href="/esg/sustainableProduct">Sustainable Products</a></div>--></div></li></ul><!-- / #navigation --></div><!-- /global-header --><script src="/Public/js/jquery.base64.js" type="text/javascript"></script><script>
+    $("#search-form").submit(function () {
+        var q = $("#search-form input[name='q']").val();
+        if (q !== ''){
+            $.base64.utf8encode = true;
+            q = encodeURIComponent($.base64.encode(q));
+            location.href = "/Search.html?q="+q;
+        } else{
+            return false;
+        }
+    });
+$(".hover-1").hover(function () {
+            var height = $(this).parent().outerHeight();
+            $(".cat-2").hide();
+            $(this).children("div").css("min-height",height+"px");
+            $(this).children("div").show();
+        },
+        function () {
+            $(".cat-2").hide();
+        }); 
+    $(".hover-2").hover(function () {
+            var height = $(this).parent().outerHeight();
+            $(".cat-4").hide();
+            $(this).children("div").css("min-height",height+"px");
+            $(this).children("div").show();
+        },
+        function () {
+            $(".cat-4").hide();
+    })
+	window.onresize = () => {
+    changeImgSize();
+};
+function changeImgSize() {
+    let screenWidth = (1 / ($(window).width() / 1920)) * 90;
+    if (screenWidth < 90) screenWidth = 90;
+    if (screenWidth > 100) screenWidth = 100;
+    $(".content-wrapper-fluid").css('max-width',screenWidth+"%");
+}
+changeImgSize();
+</script><div class="content-wrapper"><div id="content" class="full"><div class="tools"><p class="breadcrumb"><a href="/">Home</a><a class="last"  href="#">ERROR</a></p></div><div class="column-full"><h1>Parameter is not complete!</h1><p>
+          The page will automatically jump after <span class="wait" style="color:#F00">3</span> seconds, if you don’t want to wait, please <a href="javascript:history.back(-1);">click here</a> to jump
+        </p><p><br /></p></div></div><!-- / #content --></div><!-- / .content-wrapper --><!-- footer --><link rel="stylesheet" href="/Public/en/css/footer_css.css"><script type="text/javascript" src="/Public/en/js/footer_js.js"></script><div class="wave-box" style="margin-top: 60px;display: none"><div class="marquee-box marquee-up" id="marquee-box"><div class="marquee"><div class="wave-list-box" id="wave-list-box1"><ul><li><img height="60" alt="波浪" src="/Public/en/img/footer/wave_02.png"></li></ul></div><div class="wave-list-box" id="wave-list-box2"><ul><li><img height="60" alt="波浪" src="/Public/en/img/footer/wave_02.png"></li></ul></div></div></div><div class="marquee-box" id="marquee-box3"><div class="marquee"><div class="wave-list-box" id="wave-list-box4"><ul><li><img height="60" alt="波浪" src="/Public/en/img/footer/wave_01.png"></li></ul></div><div class="wave-list-box" id="wave-list-box5"><ul><li><img height="60" alt="波浪" src="/Public/en/img/footer/wave_01.png"></li></ul></div></div></div></div><div class="footer" style="margin-top: 80px"><div class="auto clearfix"><!-- footer主要--><!--<div class="five-superiority"><ul class="five-superiority-list clearfix"><li class="compensate_ico"><a href="#compensate"><span class="superiority-icon"></span><span>100倍故障赔偿</span></a></li><li class="retreat_ico"><a href="#refund"><span class="superiority-icon"></span><span>5天无理由退款</span></a></li><li class="technology_ico"><a class="superiority-text" href="#afterService"><span class="superiority-icon"></span><span>7x24小时技术支持</span></a></li><li class="prepare_ico"><a href="#ico"><span class="superiority-icon"></span><span>0元快速备案</span></a></li><li class="service_ico"><a href="#secret"><span class="superiority-icon"></span><span>1V1专席秘书</span></a></li></ul></div>--><div class="footer-floor1"><div class="footer-list"><ul><li class="flist-title">Products</li><!-- <li><a href="/classOverview/180">AC-DC Power Converter</a></li> --><li><a href="/classOverview/AC+LED+Drivers">AC LED Driver</a></li><li><a href="/classOverview/DC+LED+Drivers">DC LED Driver</a></li><li><a href="/list/Power+Modules+">Power Modules</a></li><li><a href="/classOverview/Battery+Management+ICs">Battery Management ICs</a></li></ul><ul><li class="flist-title">Applications</li><li><a href="/useoverview/Building+Automation">Building Automation</a></li><li><a href="/useoverview/Consumer+Electronic">Consumer Electronics</a></li><li><a href="/useoverview/HEA">Home Appliances</a></li><li><a href="/useoverview/Automotive">Automotive</a></li></ul><ul><li class="flist-title">Design resources</li><li><a href="/onlinesimulation">Online Simulation</a></li><li><a href="/design">Reference Design</a></li><li><a href="/quality">Quality & Reliability</a></li><!--<li><a href="">技术论坛</a></li>--></ul><ul><li class="flist-title">About Silergy</li><li><a href="/company">Company Profile</a></li><li><a href="/recruitment">Recruitment</a></li><!--<li><a href="/news/index">News</a></li>--><li><a href="/contact">Contact Us</a></li></ul><ul><li class="flist-title">Connect With Us</li><li><a href="javascript:;">USA: +14087465696</a></li><li><a href="javascript:;">EMEA: +46708760142</a></li><li><a href="javascript:;">KOREA: +827086678128</a></li><li><a href="javascript:;">JAPAN: +81452289856</a></li></ul><div class="clear-float"></div></div><div class="footer-right" style="display: none"><div style="color: white;font-size: 24px">
+                    Connect With Us
+                </div><div class="telephone" title="Service hotline"><span><img src="/Public/en/img/footer/phone.png" alt="" width="20px"></span><div class="tel-number">USA: +14087465696</div></div><div class="telephone" title="Service hotline"><span><img src="/Public/en/img/footer/phone.png" alt="" width="20px"></span><div class="tel-number">EMEA: +46708760142</div></div><div class="telephone" title="Service hotline"><span><img src="/Public/en/img/footer/phone.png" alt="" width="20px"></span><div class="tel-number">KOREA: +827086678128</div></div><div class="telephone" title="Service hotline"><span><img src="/Public/en/img/footer/phone.png" alt="" width="20px"></span><div class="tel-number">JAPAN: +81452289856</div></div><div class="official-plat" style="display: none"><p class="weixin" style="background-image: "><span id="wx-corner"></span></p><!--<p class="weibo" style="background-image: "><span id="wb-corner"></span></p>--><ul><li><a href="#a_null"><span class="weixin-logo"></span>Silergy Wechat</a></li><!--<li title="点击打开官方微博"><a href="#" target="_blank"><span class="weibo-logo"></span>某公司官方微博</a></li>--><!--<li title="点击打开官方客服"><a href="http://crm2.qq.com/page/portalpage/wpa.php?uin=XXXXXXXX&amp;aty=0&amp;a=0&amp;curl=&amp;ty=1"><span class="qq-logo"></span>某公司官方客服</a></li>--></ul></div></div><div class="clear-float"></div></div></div></div><!-- footer end --><!-- global-footer --><!--<div id="footer"><p>&copy; 2019 Silergy Corp</p><ul><li style="background:none;"><a href="/cn/">首 页</a></li><li><a href="/cn/products">产品中心</a></li><li><a href="/cn/solutions">应用方案</a></li>
+        &lt;!&ndash;  <li><a href="/cn/feedback">技术支持</a></li>&ndash;&gt;
+        <li><a href="/cn/Recruitment">加入我们</a></li><li><a href="/cn/company">关于我们</a></li><li><a href="/cn/sitemap">网站地图</a></li></ul><ul style="margin:0 auto; text-align:center; display:block;"><li style="font-size:14px; font-weight:bold;">
+            sales@silergycorp.com , marketing@silergycorp.com
+        </li></ul></div>--><!-- /global-footer --><script type="text/javascript" src="/Public/js/superfish.js"></script><script type="text/javascript">
+    $(document).ready(function () {
+        $('.users-menu li > ul').each(function () {
+            thisHeight = $(this).height();
+            $(this).css('top', -thisHeight - 2);
+        });
+        $("ul.sf-menu").superfish();
+    });
+</script><script async src="https://www.googletagmanager.com/gtag/js?id=G-3Q6MP8ENNR"></script><script>  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-3Q6MP8ENNR');
+</script></html>

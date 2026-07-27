@@ -50,6 +50,7 @@ class MatchResult:
     is_drop_in: bool = False
     disqualified: bool = False
     disqualify_reason: str = ""
+    drop_in_checklist: dict = field(default_factory=dict)
     notes: str = ""
 
 
@@ -90,15 +91,27 @@ class AlternativeFinder:
             self._conn = None
 
     def _get_parser(self):
-        """Lazy-load the datasheet parser."""
+        """Lazy-load parser. Prefer LLM if available, fall back to regex."""
         if self._datasheet_parser is None:
+            # Try LLM parser first (NVIDIA NIM)
             try:
-                from finder_extras.datasheet_parser import DatasheetParser
-                self._datasheet_parser = DatasheetParser()
+                from finder_extras.llm_parser import LLMDatasheetParser
+                self._datasheet_parser = LLMDatasheetParser()
+                log.info("Using LLM datasheet parser")
             except ImportError:
-                self._datasheet_parser = None
-        return self._datasheet_parser
+                pass
 
+            # Fall back to regex parser
+            if self._datasheet_parser is None:
+                try:
+                    from finder_extras.datasheet_parser import DatasheetParser
+                    self._datasheet_parser = DatasheetParser()
+                    log.info("Using regex datasheet parser")
+                except ImportError:
+                    self._datasheet_parser = None
+
+        return self._datasheet_parser
+    
     # ── DATASHEET ENRICHMENT (automatic) ──────────────
     def _enrich_part(self, part):
         """
@@ -281,7 +294,7 @@ class AlternativeFinder:
             unit_price=cand_row["unit_price"] or 0.0,
             datasheet_url=cand_row["datasheet_url"] or "",
             product_url=cand_row["product_url"] or "",
-        )
+                        )
 
         total_score, max_score = 0.0, 0.0
 
@@ -331,11 +344,51 @@ class AlternativeFinder:
         all_req_pass = all(
             v["status"] != "FAIL" for v in result.spec_scores.values() if v.get("required")
         )
-        result.is_drop_in = (
-            all_req_pass and pkg_s == pkg_m
-            and (target.mounting_type.lower() == result.mounting_type.lower()
-                 if target.mounting_type and result.mounting_type else all_req_pass)
+        # ── PIN COUNT CHECK ──
+        target_pins = self._pin_count_from_package(target.package)
+        cand_pins = self._pin_count_from_package(result.package)
+        pin_count_match = False
+        if target_pins and cand_pins:
+            pin_count_match = (target_pins == cand_pins)
+            pin_weight = 8.0
+            pin_score = pin_weight if pin_count_match else 0
+            total_score += pin_score
+            max_score += pin_weight
+            result.spec_scores["Pin Count"] = {
+                "target": str(target_pins), "candidate": str(cand_pins),
+                "score": pin_score, "max": pin_weight,
+                "status": "MATCH" if pin_count_match else "FAIL",
+                "required": True,
+            }
+
+        # ── PACKAGE MATCH ──
+        pkg_exact = (target.package or "").lower() == (result.package or "").lower()
+
+        # ── MOUNTING MATCH ──
+        mount_exact = True
+        if target.mounting_type and result.mounting_type:
+            mount_exact = target.mounting_type.lower() == result.mounting_type.lower()
+
+        # ── ALL REQUIRED SPECS PASS ──
+        all_req_pass = all(
+            v["status"] != "FAIL"
+            for v in result.spec_scores.values()
+            if v.get("required")
         )
+
+        # ── FINAL SCORES ──
+        result.total_score = total_score
+        result.max_possible_score = max_score
+        result.compatibility_pct = (total_score / max_score * 100) if max_score > 0 else 0
+
+        # ── DROP-IN = ALL conditions must pass ──
+        result.is_drop_in = (
+            all_req_pass
+            and pkg_exact
+            and mount_exact
+            and pin_count_match
+        )
+
         return result
 
     def _get_spec(self, specs, name, aliases=None):
@@ -468,6 +521,28 @@ class AlternativeFinder:
 
         return compare_pinouts(_get_pinout(part1), _get_pinout(part2))
 
+    def _pin_count_from_package(self, package_str):
+        """Extract expected pin count from package string like SOT-23-5 or 4-UDFN."""
+        if not package_str:
+            return None
+        import re
+        # Trailing number: SOT-23-5 → 5, QFN-16 → 16
+        m = re.search(r'(\d+)\s*$', package_str.strip())
+        if m:
+            return int(m.group(1))
+        # Leading number: 4-UDFN → 4, 8-SOIC → 8
+        m = re.search(r'^(\d+)\s*-', package_str.strip())
+        if m:
+            return int(m.group(1))
+        # Known packages without numbers
+        pkg = package_str.lower()
+        known = {"sot-23": 3, "sot23": 3, "sc-59": 3, "sot-89": 3,
+                 "to-92": 3, "to-252": 3, "to-263": 3, "to-220": 3}
+        for k, v in known.items():
+            if k in pkg:
+                return v
+        return None
+    
     # ── DB STATS ──────────────────────────────────────
     def stats(self):
         conn = self._get_conn()

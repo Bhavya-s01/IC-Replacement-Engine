@@ -1,0 +1,10 @@
+ic_database.db
+ic_database.db-shm
+ic_database.db-wal
+__pycache__/
+*.pyc
+downloads/
+exports/
+.agents/
+node_modules/
+dist/
