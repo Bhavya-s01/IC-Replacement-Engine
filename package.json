@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dds/react": "^3.0.1",
+    "@fontsource/roboto": "^5.3.0",
     "axios": "^1.18.1",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",

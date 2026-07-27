@@ -1,3 +1,24 @@
+@import "tailwindcss";
+@import "@fontsource/roboto/400.css";
+@import "@fontsource/roboto/500.css";
+@import "@fontsource/roboto/700.css";
+/* DDS Design System */
+@import "@dds/react/css/dds-tokens.css";
+@import "@dds/react/css/dds-fonts.css";
+@import "@dds/react/css/dds-typography.css";
+@import "@dds/react/css/dds-icons.css";
+@import "@dds/react/css/dds-styles.css";
+@import "@dds/react/css/dds-helpers.css";
+@import "@dds/react/css/dds-grid.css";
+@import "@dds/react/css/dds-components.css";
+
+/* Tailwind (after DDS so it can override) */
+@import "tailwindcss";
+
+body {
+  font-family: "Roboto", "Arial", sans-serif;
+}
+
 .counter {
   font-size: 16px;
   padding: 5px 10px;

@@ -25,4 +25,12 @@ export const api = {
     API.get('/stats'),
   matchingRules: () =>
     API.get('/matching-rules'),
+  supplyChainStats: () =>
+    API.get('/supply-chain-stats'),
+  supplyChain: (mpn: string) =>
+    API.get(`/supply-chain/${encodeURIComponent(mpn)}`),
+  alternativesFull: (mpn: string, topN = 15, minCompat = 25) =>
+    API.get(`/alternatives-full/${encodeURIComponent(mpn)}`, {
+      params: { top_n: topN, min_compat: minCompat },
+    }),
 }
