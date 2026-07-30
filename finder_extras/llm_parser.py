@@ -45,7 +45,7 @@ NVIDIA_API_KEY = os.environ.get(
     "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"
 )
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
+NVIDIA_MODEL = "meta/llama-3.1-70b-instruct"
 
 
 # ═══════════════════════════════════════════
@@ -129,24 +129,81 @@ Also extract PIN ASSIGNMENTS (pin number, name, function)."""
 # PDF handling
 # ═══════════════════════════════════════════
 def download_pdf(url, mpn, download_dir="downloads/datasheets"):
+    """Download a datasheet. Handles LCSC HTML wrappers by extracting real PDF URL."""
     if not url or not REQUESTS_OK:
-        return None
+        return None, None
     os.makedirs(download_dir, exist_ok=True)
-    safe = re.sub(r"[^\w\-.]", "_", mpn) + ".pdf"
-    path = os.path.join(download_dir, safe)
-    if os.path.exists(path):
-        return path
+    safe = re.sub(r"[^\w\-.]", "_", mpn)
+
+    pdf_path = os.path.join(download_dir, safe + ".pdf")
+    html_path = os.path.join(download_dir, safe + ".html")
+
+    # Check for cached files
+    if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 5000:
+        with open(pdf_path, "rb") as f:
+            if f.read(5) == b"%PDF-":
+                return pdf_path, "pdf"
+
+    if os.path.exists(html_path) and os.path.getsize(html_path) > 1000:
+        return html_path, "html"
+
     try:
         resp = requests.get(url, timeout=30, verify=False,
                             headers={"User-Agent": "Mozilla/5.0"})
-        if resp.status_code == 200:
-            with open(path, "wb") as f:
-                f.write(resp.content)
-            log.info("Downloaded %s (%d KB)", mpn, len(resp.content) // 1024)
-            return path
+        if resp.status_code != 200:
+            return None, None
+
+        content = resp.content
+
+        # Check if it's actually a PDF
+        if content[:5] == b"%PDF-":
+            with open(pdf_path, "wb") as f:
+                f.write(content)
+            log.info("  Downloaded %s.pdf (%d KB)", safe, len(content) // 1024)
+            return pdf_path, "pdf"
+
+        # It's HTML — try to extract the real PDF URL from LCSC wrapper
+        if b"<!doctype" in content[:50].lower() or b"<html" in content[:50].lower():
+            text = content.decode("utf-8", errors="replace")
+
+            # LCSC embeds the real PDF URL in the page
+            real_pdf_patterns = [
+                r'(https?://wmsc\.lcsc\.com/[^"\']+\.pdf)',
+                r'"pdfUrl"\s*:\s*"(https?://[^"]+\.pdf)"',
+                r'src="(https?://[^"]+\.pdf[^"]*)"',
+                r'href="(https?://[^"]+\.pdf[^"]*)"',
+            ]
+
+            for pattern in real_pdf_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    real_url = match.group(1)
+                    log.info("  Found real PDF URL: %s", real_url[:70])
+                    try:
+                        pdf_resp = requests.get(real_url, timeout=30, verify=False,
+                                                headers={"User-Agent": "Mozilla/5.0"})
+                        if pdf_resp.status_code == 200 and pdf_resp.content[:5] == b"%PDF-":
+                            with open(pdf_path, "wb") as f:
+                                f.write(pdf_resp.content)
+                            log.info("  Downloaded real PDF (%d KB)", len(pdf_resp.content) // 1024)
+                            return pdf_path, "pdf"
+                    except Exception:
+                        pass
+
+            # No real PDF found — save HTML for text extraction
+            with open(html_path, "wb") as f:
+                f.write(content)
+            log.info("  Downloaded %s.html (%d KB)", safe, len(content) // 1024)
+            return html_path, "html"
+
+        # Unknown content type
+        with open(pdf_path, "wb") as f:
+            f.write(content)
+        return pdf_path, "pdf"
+
     except Exception as exc:
         log.debug("Download failed %s: %s", mpn, exc)
-    return None
+        return None, None
 
 
 def extract_pdf_text(pdf_path, max_pages=12):
@@ -162,6 +219,26 @@ def extract_pdf_text(pdf_path, max_pages=12):
         return text
     except Exception:
         return ""
+
+def extract_html_text(html_content):
+    """Extract readable text from HTML content."""
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_content, "html.parser")
+        # Remove script and style elements
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        # Truncate to fit LLM context
+        if len(text) > 12000:
+            text = text[:12000]
+        return text
+    except ImportError:
+        # Fallback: strip tags with regex
+        import re
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:12000]
 
 
 # ═══════════════════════════════════════════
@@ -282,12 +359,6 @@ def extract_with_llm(text, mpn, category="", package=""):
 # Main Parser Class
 # ═══════════════════════════════════════════
 class LLMDatasheetParser:
-    """
-    Drop-in replacement for DatasheetParser.
-    Uses NVIDIA NIM for intelligent spec extraction.
-    Falls back to regex parser if LLM fails.
-    """
-
     def __init__(self, download_dir="downloads/datasheets"):
         self.download_dir = download_dir
 
@@ -296,44 +367,46 @@ class LLMDatasheetParser:
 
         pinout = PinoutInfo(mpn=mpn, package=package)
 
-        # Download PDF
-        pdf_path = download_pdf(url, mpn, self.download_dir)
-        if not pdf_path:
+        # Download — handles both PDF and HTML
+        file_path, file_type = download_pdf(url, mpn, self.download_dir)
+        if not file_path:
             return {}, pinout
 
-        # Extract text
-        text = extract_pdf_text(pdf_path)
-        if not text:
+        # Extract text based on file type
+        if file_type == "pdf":
+            text = extract_pdf_text(file_path)
+        elif file_type == "html":
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                html_content = f.read()
+            text = extract_html_text(html_content)
+        else:
             return {}, pinout
 
-        # Try LLM extraction
+        if not text or len(text) < 100:
+            log.warning("  Insufficient text from %s (%s)", mpn, file_type)
+            return {}, pinout
+
+        log.info("  Extracted %d chars from %s (%s)", len(text), mpn, file_type)
+
+        # Use LLM to extract specs (same call for PDF or HTML text)
         specs, pins = extract_with_llm(text, mpn, category, package)
 
-        # If LLM failed, fall back to regex parser
-        if not specs:
-            try:
-                from finder_extras.datasheet_parser import DatasheetParser
-                fallback = DatasheetParser()
-                pages = text.split("\n\n")
-                specs = fallback.extract_specs(pages, category=category)
-                log.info("Fell back to regex parser: %d specs", len(specs))
-            except Exception:
-                pass
-
-        # Build PinoutInfo from LLM output
+        # Build pinout from LLM output
         if pins:
             for pin_num_str, pin_data in pins.items():
                 try:
                     num = int(pin_num_str)
                     name = pin_data.get("name", "")
                     if name:
-                        pinout.add_pin(num, name,
-                                       pin_data.get("function", ""))
+                        pinout.add_pin(num, name, pin_data.get("function", ""))
                 except (ValueError, TypeError):
                     pass
-
             if pinout.is_valid():
                 pinout.confidence = 0.9
                 pinout.source = "llm_extraction"
+
+            # Store pin count as a spec directly from LLM extraction
+            if pinout.total_pins > 0:
+                specs["Pin Count"] = str(pinout.total_pins)
 
         return specs, pinout

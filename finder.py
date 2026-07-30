@@ -15,6 +15,9 @@ import sys
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+import json
+
+#from rich.pretty import data
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -38,7 +41,7 @@ class MatchResult:
     subcategory: str
     package: str
     mounting_type: str
-    lifecycle_status: str
+    lifecycle_status: str = ""
     stock: int = 0
     unit_price: float = 0.0
     datasheet_url: str = ""
@@ -64,7 +67,7 @@ class PartInfo:
     subcategory: str
     package: str
     mounting_type: str
-    lifecycle_status: str
+    lifecycle_status: str = ""
     stock: int = 0
     unit_price: float = 0.0
     datasheet_url: str = ""
@@ -198,9 +201,7 @@ class AlternativeFinder:
             component_id=row["id"], mpn=row["manufacturer_part_number"],
             manufacturer=row["manufacturer"] or "", description=row["description"] or "",
             category=row["category"] or "", subcategory=row["subcategory"] or "",
-            package=row["package"] or "", mounting_type=row["mounting_type"] or "",
-            lifecycle_status=row["lifecycle_status"] or "", stock=row["stock"] or 0,
-            unit_price=row["unit_price"] or 0.0, datasheet_url=row["datasheet_url"] or "",
+            package=row["package"] or "", mounting_type=row["mounting_type"] or "", datasheet_url=row["datasheet_url"] or "",
             product_url=row["product_url"] or "",
             specs={r["spec_name"]: r["spec_value"] for r in specs_rows},
         )
@@ -222,9 +223,7 @@ class AlternativeFinder:
                 component_id=row["id"], mpn=row["manufacturer_part_number"],
                 manufacturer=row["manufacturer"] or "", description=row["description"] or "",
                 category=row["category"] or "", subcategory=row["subcategory"] or "",
-                package=row["package"] or "", mounting_type=row["mounting_type"] or "",
-                lifecycle_status=row["lifecycle_status"] or "", stock=row["stock"] or 0,
-                unit_price=row["unit_price"] or 0.0, datasheet_url=row["datasheet_url"] or "",
+                package=row["package"] or "", mounting_type=row["mounting_type"] or "", datasheet_url=row["datasheet_url"] or "",
                 product_url=row["product_url"] or "",
                 specs={r["spec_name"]: r["spec_value"] for r in specs_rows},
             ))
@@ -264,17 +263,14 @@ class AlternativeFinder:
         log.info("Evaluating %d candidates for %s", len(candidates), target.mpn)
 
         results = []
+                # Load ALL specs for this category in ONE query
+        specs_cache = self._load_specs_cache(target.category)
+
         for cand_row in candidates:
-            cand_specs_rows = conn.execute(
-                "SELECT spec_name, spec_value FROM specifications WHERE component_id = ? AND spec_name NOT LIKE '\\_%' ESCAPE '\\'",
-                (cand_row["id"],)
-            ).fetchall()
-            cand_specs = {r["spec_name"]: r["spec_value"] for r in cand_specs_rows}
-
+            cand_specs = specs_cache.get(cand_row["id"], {})
             result = self._score_candidate(target, cand_row, cand_specs, rules)
-            if not result.disqualified and result.compatibility_pct >= min_compatibility_pct:
+            if result.compatibility_pct >= min_compatibility_pct:
                 results.append(result)
-
         results.sort(key=lambda r: r.compatibility_pct, reverse=True)
         return results[:top_n]
 
@@ -289,9 +285,6 @@ class AlternativeFinder:
             subcategory=cand_row["subcategory"] or "",
             package=cand_row["package"] or "",
             mounting_type=cand_row["mounting_type"] or "",
-            lifecycle_status=cand_row["lifecycle_status"] or "",
-            stock=cand_row["stock"] or 0,
-            unit_price=cand_row["unit_price"] or 0.0,
             datasheet_url=cand_row["datasheet_url"] or "",
             product_url=cand_row["product_url"] or "",
                         )
@@ -332,9 +325,10 @@ class AlternativeFinder:
         total_score += ts; max_score += tm
 
         # Lifecycle (active = bonus)
-        lm = rules.lifecycle_weight
-        ls = lm if (result.lifecycle_status or "").lower() == "active" else 0
-        total_score += ls; max_score += lm
+    # [REMOVED] lm = rules.lifecycle_weight  # lifecycle not used
+                # Lifecycle scoring disabled (technical-only mode)
+        ls = 0
+        lm = 0
 
         # Final
         result.total_score = total_score
@@ -344,9 +338,30 @@ class AlternativeFinder:
         all_req_pass = all(
             v["status"] != "FAIL" for v in result.spec_scores.values() if v.get("required")
         )
-        # ── PIN COUNT CHECK ──
-        target_pins = self._pin_count_from_package(target.package)
-        cand_pins = self._pin_count_from_package(result.package)
+        # ── PIN COUNT CHECK (from LLM extraction, not package string) ──
+        target_pins = None
+        cand_pins = None
+        
+        # Try LLM-extracted pin count first
+        tp = target.specs.get("Pin Count")
+        if tp:
+            try:
+                target_pins = int(tp)
+            except (ValueError, TypeError):
+                pass
+        
+        cp = cand_specs.get("Pin Count")
+        if cp:
+            try:
+                cand_pins = int(cp)
+            except (ValueError, TypeError):
+                pass
+        
+        # Fall back to package parsing only if LLM didn't provide it
+        if not target_pins:
+            target_pins = self._pin_count_from_package(target.package)
+        if not cand_pins:
+            cand_pins = self._pin_count_from_package(result.package)
         pin_count_match = False
         if target_pins and cand_pins:
             pin_count_match = (target_pins == cand_pins)
@@ -382,12 +397,10 @@ class AlternativeFinder:
         result.compatibility_pct = (total_score / max_score * 100) if max_score > 0 else 0
 
         # ── DROP-IN = ALL conditions must pass ──
-        result.is_drop_in = (
-            all_req_pass
-            and pkg_exact
-            and mount_exact
-            and pin_count_match
-        )
+        pkg_match = (target.package or "").lower() == (result.package or "").lower()
+        mount_match = (target.mounting_type or "").lower() == (result.mounting_type or "").lower()
+
+        result.is_drop_in = pkg_match and mount_match and pin_count_match and all_req_pass
 
         return result
 
@@ -398,6 +411,25 @@ class AlternativeFinder:
             if alias in specs and specs[alias] and specs[alias] != "-":
                 return specs[alias]
         return None
+
+    def _load_specs_cache(self, category):
+        """Load all specs for a category in ONE query using specs_cache."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT c.id, sc.specs_json
+            FROM components c
+            INNER JOIN specs_cache sc ON sc.component_id = c.id
+            WHERE c.category = ?
+        """, (category,)).fetchall()
+
+        cache = {}
+        for comp_id, specs_json in rows:
+            try:
+                cache[comp_id] = json.loads(specs_json)
+            except (json.JSONDecodeError, TypeError):
+                cache[comp_id] = {}
+        return cache
 
     def _score_spec(self, rule, target_val, cand_val):
         mx = rule.weight
@@ -484,20 +516,79 @@ class AlternativeFinder:
         return (0, mx)
 
     # ── PINOUT COMPARISON ─────────────────────────────
+        # ── PINOUT COMPARISON ─────────────────────────────
     def compare_pinouts(self, mpn1, mpn2):
+        """Compare pinouts using cached LLM-extracted pin data.
+        Returns (score, details_dict).
+        """
         try:
-            from finder_extras.datasheet_parser import DatasheetParser, compare_pinouts, PinoutInfo
+            from finder_extras.datasheet_parser import compare_pinouts, PinoutInfo
         except ImportError:
             return 0.0, {"status": "missing_module"}
 
-        parser = DatasheetParser()
         part1 = self.lookup(mpn1)
         part2 = self.lookup(mpn2)
-        if not part1: return 0.0, {"error": "Not found: " + mpn1}
-        if not part2: return 0.0, {"error": "Not found: " + mpn2}
+        if not part1:
+            return 0.0, {"status": "error", "message": "Not found: " + mpn1}
+        if not part2:
+            return 0.0, {"status": "error", "message": "Not found: " + mpn2}
 
         conn = self._get_conn()
-        import json
+
+        def _get_cached_pinout(part):
+            """Load pinout from _pinout_json in specifications table."""
+            pin = PinoutInfo(mpn=part.mpn, package=part.package)
+
+            row = conn.execute(
+                "SELECT spec_value FROM specifications "
+                "WHERE component_id = ? AND spec_name = '_pinout_json'",
+                (part.component_id,)
+            ).fetchone()
+
+            if row and row[0]:
+                try:
+                    data = json.loads(row[0])
+                    pin.confidence = data.get("confidence", 0)
+                    pin.source = data.get("source", "unknown")
+                    pin.expected_pins = data.get("expected_pins")
+                    for pn, pd in data.get("pins", {}).items():
+                        pin.add_pin(
+                            int(pn),
+                            pd.get("name", ""),
+                            pd.get("description", "")
+                        )
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+
+            return pin
+
+        pin1 = _get_cached_pinout(part1)
+        pin2 = _get_cached_pinout(part2)
+
+        # If either part has no cached pinout, report it
+        if pin1.total_pins == 0 and pin2.total_pins == 0:
+            return 0.0, {
+                "status": "no_pinout_data",
+                "message": "Neither part has LLM-extracted pinout data",
+                "target_pins": 0,
+                "candidate_pins": 0,
+            }
+        if pin1.total_pins == 0:
+            return 0.0, {
+                "status": "target_missing_pinout",
+                "message": "Target has no LLM-extracted pinout data",
+                "target_pins": 0,
+                "candidate_pins": pin2.total_pins,
+            }
+        if pin2.total_pins == 0:
+            return 0.0, {
+                "status": "candidate_missing_pinout",
+                "message": "Candidate has no LLM-extracted pinout data",
+                "target_pins": pin1.total_pins,
+                "candidate_pins": 0,
+            }
+
+        return compare_pinouts(pin1, pin2)
 
         def _get_pinout(part):
             row = conn.execute(
@@ -505,42 +596,74 @@ class AlternativeFinder:
                 (part.component_id,)
             ).fetchone()
             pin = PinoutInfo(mpn=part.mpn, package=part.package)
+
             if row and row[0]:
+
                 data = json.loads(row[0])
+
+                pin.confidence = data.get("confidence", 0)
+                pin.source = data.get("source", "unknown")
+                pin.expected_pins = data.get("expected_pins")
+
                 for pn, pd in data.get("pins", {}).items():
-                    pin.add_pin(int(pn), pd["name"], pd.get("description", ""))
+                    pin.add_pin(
+                        int(pn),
+                        pd["name"],
+                        pd.get("description", "")
+                    )
+
             elif part.datasheet_url:
-                _, pin = parser.parse_datasheet(part.datasheet_url, part.mpn, part.package, part.category)
-                if pin.is_valid():
+
+                _, pin = parser.parse_datasheet(
+                    part.datasheet_url,
+                    part.mpn,
+                    part.package,
+                    part.category
+                )
+
+                if pin.total_pins > 0:
+
                     conn.execute(
-                        "INSERT OR REPLACE INTO specifications (component_id, spec_name, spec_value) VALUES (?, ?, ?)",
+                        "INSERT OR REPLACE INTO specifications "
+                        "(component_id, spec_name, spec_value) "
+                        "VALUES (?, ?, ?)",
                         (part.component_id, "_pinout_json", pin.to_json())
                     )
+
                     conn.commit()
             return pin
 
         return compare_pinouts(_get_pinout(part1), _get_pinout(part2))
 
     def _pin_count_from_package(self, package_str):
-        """Extract expected pin count from package string like SOT-23-5 or 4-UDFN."""
         if not package_str:
             return None
         import re
-        # Trailing number: SOT-23-5 → 5, QFN-16 → 16
-        m = re.search(r'(\d+)\s*$', package_str.strip())
-        if m:
-            return int(m.group(1))
-        # Leading number: 4-UDFN → 4, 8-SOIC → 8
-        m = re.search(r'^(\d+)\s*-', package_str.strip())
-        if m:
-            return int(m.group(1))
-        # Known packages without numbers
-        pkg = package_str.lower()
-        known = {"sot-23": 3, "sot23": 3, "sc-59": 3, "sot-89": 3,
-                 "to-92": 3, "to-252": 3, "to-263": 3, "to-220": 3}
-        for k, v in known.items():
-            if k in pkg:
-                return v
+        
+        KNOWN = {
+            "sot-753": 5, "sot753": 5, "sc-74a": 5, "sc74a": 5,
+            "sc-74": 5, "sot-23-5": 5, "sot-23-6": 6, "sot-23-8": 8,
+            "sot-23": 3, "sot23": 3, "sc-59": 3, "sc-88a": 6,
+            "sc-70": 3, "sot-89": 3, "sot-363": 6, "sot-563": 6,
+            "to-92": 3, "to-220": 3, "to-252": 3, "dpak": 3,
+            "to-263": 3, "d2pak": 3,
+        }
+        
+        parts = [p.strip().lower() for p in package_str.split(",")]
+        for part in parts:
+            if part in KNOWN:
+                return KNOWN[part]
+            m = re.search(r"-(\d+)$", part)
+            if m:
+                n = int(m.group(1))
+                if n <= 200:
+                    return n
+        for part in parts:
+            m = re.match(r"(\d+)\s*-", part)
+            if m:
+                n = int(m.group(1))
+                if n <= 200:
+                    return n
         return None
     
     # ── DB STATS ──────────────────────────────────────

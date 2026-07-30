@@ -1,0 +1,41 @@
+    def _load_specs_cache(self, category):
+        """Load all specs for a category in ONE query."""
+        import json
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # Try specs_cache first (fast), fall back to EAV table (slow)
+        try:
+            rows = conn.execute("""
+                SELECT c.id, sc.specs_json
+                FROM components c
+                INNER JOIN specs_cache sc ON sc.component_id = c.id
+                WHERE c.category = ?
+            """, (category,)).fetchall()
+            
+            cache = {}
+            for row in rows:
+                try:
+                    cache[row["id"]] = json.loads(row["specs_json"])
+                except (json.JSONDecodeError, TypeError):
+                    cache[row["id"]] = {}
+            conn.close()
+            return cache
+        except Exception:
+            # specs_cache table doesn't exist — fall back to EAV
+            rows = conn.execute("""
+                SELECT c.id, s.spec_name, s.spec_value
+                FROM components c
+                JOIN specifications s ON s.component_id = c.id
+                WHERE c.category = ?
+                AND s.spec_name NOT LIKE '_%%'
+            """, (category,)).fetchall()
+            
+            cache = {}
+            for row in rows:
+                cid = row["id"]
+                if cid not in cache:
+                    cache[cid] = {}
+                cache[cid][row["spec_name"]] = row["spec_value"]
+            conn.close()
+            return cache

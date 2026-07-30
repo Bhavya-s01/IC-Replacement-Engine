@@ -8,6 +8,7 @@ import sys
 import os
 import logging
 from typing import Optional, List, Dict
+import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,12 +57,9 @@ def get_dashboard():
     conn = db._get_conn()
 
     lifecycle = {}
-    rows = conn.execute(
-        "SELECT lifecycle_status, COUNT(*) as cnt FROM components "
-        "WHERE lifecycle_status != '' GROUP BY lifecycle_status"
-    ).fetchall()
+    rows = []  # lifecycle_status column removed from database
     for r in rows:
-        lifecycle[r["lifecycle_status"]] = r["cnt"]
+        lifecycle[""] = r["cnt"]
 
     return {
         "total": total,
@@ -102,9 +100,6 @@ def search_parts(
             "description": r.description,
             "category": r.category,
             "package": r.package,
-            "stock": r.stock,
-            "unit_price": r.unit_price,
-            "lifecycle_status": r.lifecycle_status,
         }
         for r in results
     ]
@@ -124,10 +119,7 @@ def lookup_part(mpn: str):
         "subcategory": part.subcategory,
         "package": part.package,
         "mounting_type": part.mounting_type,
-        "lifecycle_status": part.lifecycle_status,
-        "stock": part.stock,
-        "unit_price": part.unit_price,
-        "datasheet_url": part.datasheet_url,
+       "datasheet_url": part.datasheet_url,
         "product_url": part.product_url,
         "specs": part.specs,
     }
@@ -140,7 +132,6 @@ def find_alternatives(
     min_compat: float = Query(30.0, ge=0, le=100),
     same_package: bool = False,
 ):
-    """Find compatible alternatives with drop-in detail."""
     target = finder.lookup(mpn)
     if not target:
         raise HTTPException(status_code=404, detail="Part not found: {}".format(mpn))
@@ -163,12 +154,80 @@ def find_alternatives(
         pkg_match = (target.package or "").lower() == (a.package or "").lower()
         mount_match = (target.mounting_type or "").lower() == (a.mounting_type or "").lower()
 
-        # Filter out BOTH_MISSING rows for cleaner display
+        # Filter out BOTH_MISSING rows, replace dashes with n/a
         filtered_scores = {}
         for name, d in a.spec_scores.items():
             if d["status"] == "BOTH_MISSING":
-                continue  # hide rows where neither part has data
-            filtered_scores[name] = d
+                continue
+            entry = dict(d)
+            if entry["target"] == "-":
+                entry["target"] = "n/a"
+            if entry["candidate"] == "-":
+                entry["candidate"] = "n/a"
+            filtered_scores[name] = entry
+
+        # # Check P2P match from supply chain table
+        # p2p_match = False
+        # p2p_mpn = None
+
+        # P2P pin-to-pin comparison using cached LLM-extracted pinout data
+        p2p_match = False
+        p2p_score = 0.0
+        p2p_details = {}
+        p2p_mpn = None
+
+        try:
+            p2p_score, p2p_details = finder.compare_pinouts(
+                target.mpn,
+                a.mpn
+            )
+            p2p_match = p2p_score >= 0.80
+        except Exception as e:
+            p2p_details = {"status": "error", "message": str(e)}
+
+        # Also check supply chain P2P solution for TARGET part
+        sc_p2p = None
+        try:
+            sc_p2p_row = conn_sc.execute(
+                "SELECT p2p_mpn, p2p_supplier FROM supply_chain WHERE mpn = ? LIMIT 1",
+                (target.mpn,)
+            ).fetchone()
+            if sc_p2p_row and sc_p2p_row["p2p_mpn"]:
+                sc_p2p = {
+                    "p2p_mpn": sc_p2p_row["p2p_mpn"],
+                    "p2p_supplier": sc_p2p_row["p2p_supplier"],
+                    "is_match": a.mpn.lower().strip() == sc_p2p_row["p2p_mpn"].strip().lower(),
+                }
+                if sc_p2p["is_match"]:
+                    p2p_match = True
+                    p2p_score = 1.0
+        except Exception:
+            pass
+
+        try:
+            sc_row = conn.execute(
+                "SELECT p2p_mpn FROM supply_chain WHERE mpn = ? LIMIT 1",
+                (a.mpn,)
+            ).fetchone()
+            if sc_row and sc_row["p2p_mpn"]:
+                p2p_match = True
+                p2p_mpn = sc_row["p2p_mpn"]
+        except Exception:
+            pass
+
+        # Check if this alternative has supply chain data
+        has_sc = False
+        sc_odm = None
+        try:
+            sc_check = conn.execute(
+                "SELECT odm_name FROM supply_chain WHERE mpn = ? LIMIT 1",
+                (a.mpn,)
+            ).fetchone()
+            if sc_check:
+                has_sc = True
+                sc_odm = sc_check["odm_name"]
+        except Exception:
+            pass
 
         results.append({
             "mpn": a.mpn,
@@ -177,9 +236,6 @@ def find_alternatives(
             "category": a.category,
             "package": a.package,
             "mounting_type": a.mounting_type,
-            "lifecycle_status": a.lifecycle_status,
-            "stock": a.stock,
-            "unit_price": a.unit_price,
             "datasheet_url": a.datasheet_url,
             "product_url": a.product_url,
             "compatibility_pct": a.compatibility_pct,
@@ -187,11 +243,18 @@ def find_alternatives(
             "max_possible_score": a.max_possible_score,
             "is_drop_in": a.is_drop_in,
             "spec_scores": filtered_scores,
+            "has_supply_chain": has_sc,
+            "supply_chain_odm": sc_odm,
             "drop_in_checklist": {
                 "package_match": pkg_match,
                 "mounting_match": mount_match,
                 "required_specs_pass": all_req_pass,
-                "lifecycle_active": (a.lifecycle_status or "").lower() == "active",
+                "pin_count_match": a.spec_scores.get("Pin Count", {}).get("status") == "MATCH" if "Pin Count" in a.spec_scores else None,
+                "target_pins": int(a.spec_scores["Pin Count"]["target"]) if "Pin Count" in a.spec_scores and a.spec_scores["Pin Count"]["target"].isdigit() else None,
+                "candidate_pins": int(a.spec_scores["Pin Count"]["candidate"]) if "Pin Count" in a.spec_scores and a.spec_scores["Pin Count"]["candidate"].isdigit() else None,
+                "p2p_match": p2p_match,
+                "p2p_score": round(p2p_score * 100, 1),
+                "p2p_details": p2p_details,
                 "target_package": target.package or "",
                 "candidate_package": a.package or "",
                 "target_mounting": target.mounting_type or "",
@@ -200,7 +263,6 @@ def find_alternatives(
         })
 
     return results
-
 
 @app.get("/api/compare")
 def compare_parts(mpn1: str, mpn2: str):
@@ -218,16 +280,12 @@ def compare_parts(mpn1: str, mpn2: str):
             "mpn": a.mpn, "manufacturer": a.manufacturer,
             "description": a.description, "category": a.category,
             "package": a.package, "mounting_type": a.mounting_type,
-            "lifecycle_status": a.lifecycle_status,
-            "stock": a.stock, "unit_price": a.unit_price,
             "specs": a.specs,
         },
         "part_b": {
             "mpn": b.mpn, "manufacturer": b.manufacturer,
             "description": b.description, "category": b.category,
             "package": b.package, "mounting_type": b.mounting_type,
-            "lifecycle_status": b.lifecycle_status,
-            "stock": b.stock, "unit_price": b.unit_price,
             "specs": b.specs,
         },
         "all_spec_names": all_specs,
@@ -237,7 +295,6 @@ def compare_parts(mpn1: str, mpn2: str):
 @app.get("/api/browse")
 def browse_category(
     category: str,
-    sort_by: str = "stock",
     sort_dir: str = "desc",
     limit: int = Query(50, le=500),
     offset: int = 0,
@@ -245,16 +302,17 @@ def browse_category(
     conn = db._get_conn()
 
     valid_sorts = {
-        "stock": "stock", "price": "unit_price",
         "mpn": "manufacturer_part_number",
         "manufacturer": "manufacturer",
     }
-    sort_col = valid_sorts.get(sort_by, "stock")
+
+    sort_col = "manufacturer_part_number"
+    direction = "ASC"
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
     rows = conn.execute(
         "SELECT manufacturer_part_number, manufacturer, description, "
-        "stock, unit_price, package, mounting_type, lifecycle_status "
+        "package, mounting_type "
         "FROM components WHERE category=? ORDER BY {} {} LIMIT ? OFFSET ?".format(sort_col, direction),
         (category, limit, offset)
     ).fetchall()
@@ -277,14 +335,14 @@ def browse_category(
 def lifecycle_summary():
     conn = db._get_conn()
     rows = conn.execute(
-        "SELECT lifecycle_status, category, COUNT(*) as cnt "
+        "SELECT category, COUNT(*) as cnt "
         "FROM components WHERE lifecycle_status != '' "
-        "GROUP BY lifecycle_status, category"
+        "GROUP BY category"
     ).fetchall()
 
     summary = {}
     for r in rows:
-        status = r["lifecycle_status"]
+        status = ""
         if status not in summary:
             summary[status] = {"total": 0, "categories": {}}
         summary[status]["total"] += r["cnt"]
@@ -494,6 +552,9 @@ def find_alternatives_full(
     except Exception:
         pass
 
+    conn_sc = sqlite3.connect("ic_database.db")
+    conn_sc.row_factory = sqlite3.Row
+
     # Build results with supply chain enrichment
     results = []
     for a in alts:
@@ -504,7 +565,6 @@ def find_alternatives_full(
             "category": a.category,
             "package": a.package,
             "mounting_type": a.mounting_type,
-            "lifecycle_status": a.lifecycle_status,
             "datasheet_url": a.datasheet_url,
             "compatibility_pct": a.compatibility_pct,
             "is_drop_in": a.is_drop_in,
@@ -571,9 +631,6 @@ def find_alternatives(
             "category": a.category,
             "package": a.package,
             "mounting_type": a.mounting_type,
-            "lifecycle_status": a.lifecycle_status,
-            "stock": a.stock,
-            "unit_price": a.unit_price,
             "datasheet_url": a.datasheet_url,
             "product_url": a.product_url,
             "compatibility_pct": a.compatibility_pct,

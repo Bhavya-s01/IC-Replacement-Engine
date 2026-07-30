@@ -288,7 +288,11 @@ class PinoutInfo:
     def is_valid(self):
         if self.total_pins < 2:
             return False
-        if self.expected_pins is not None and self.total_pins != self.expected_pins:
+        if (
+            self.expected_pins is not None
+            and self.expected_pins < 100
+            and self.total_pins != self.expected_pins
+        ):
             return False
         pin_nums = set()
         for pn in self.pins:
@@ -311,7 +315,7 @@ class PinoutInfo:
 
 def compare_pinouts(target, candidate):
     """Strict pin comparison. Indeterminate = incompatible, not assumed ok."""
-    if not target.is_valid() or not candidate.is_valid():
+    if target.total_pins < 2 or candidate.total_pins < 2:
         return 0.0, {"status": "invalid_pinout_data",
                       "target_valid": target.is_valid(), "candidate_valid": candidate.is_valid(),
                       "target_pins": target.total_pins, "target_expected": target.expected_pins,
@@ -526,12 +530,12 @@ class DatasheetParser:
                 conn.execute("INSERT INTO specifications (component_id, spec_name, spec_value) VALUES (?,?,?)",
                              (component_id, name, val))
 
-        if pinout.is_valid():
-            conn.execute("INSERT OR REPLACE INTO specifications (component_id, spec_name, spec_value) VALUES (?,?,?)",
-                         (component_id, "_pinout_json", pinout.to_json()))
-        else:
-            conn.execute("DELETE FROM specifications WHERE component_id=? AND spec_name='_pinout_json'",
-                         (component_id,))
+            # Always persist extracted pinout
+            if pinout.total_pins > 0:
+                conn.execute(
+                    "INSERT OR REPLACE INTO specifications (component_id, spec_name, spec_value) VALUES (?,?,?)",
+                    (component_id, "_pinout_json", pinout.to_json())
+                )
 
         conn.commit()
         log.info("Enriched %s: %d specs, %d pins (valid=%s)", mpn, len(specs), pinout.total_pins, pinout.is_valid())

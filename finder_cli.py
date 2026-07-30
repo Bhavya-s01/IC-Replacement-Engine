@@ -20,7 +20,7 @@ def print_part(part, show_specs=True):
     print("  Subcategory:  {}".format(part.subcategory))
     print("  Package:      {}".format(part.package))
     print("  Mounting:     {}".format(part.mounting_type))
-    print("  Status:       {}".format(part.lifecycle_status))
+    print("  Status:       {}".format(""))
     if part.datasheet_url:
         print("  Datasheet:    {}".format(part.datasheet_url))
     print("=" * 70)
@@ -48,7 +48,7 @@ def print_alternatives(target, alts):
         print("    Manufacturer: {}".format(alt.manufacturer))
         print("    Description:  {}".format(alt.description[:60]))
         print("    Package:      {}".format(alt.package))
-        print("    Status:       {}".format(alt.lifecycle_status))
+        print("    Status:       {}".format("—"  # lifecycle removed))
         print("    Score:        {:.1f} / {:.1f}".format(alt.total_score, alt.max_possible_score))
 
         if alt.spec_scores:
@@ -137,7 +137,7 @@ def cmd_interactive(args):
                 if not b: print("  Not found: {}".format(parts[2]))
         elif cmd == "search" and len(parts) >= 2:
             for r in finder.search(" ".join(parts[1:]), limit=10):
-                print("  {} | {} | {} | {}".format(r.mpn, r.manufacturer, r.category, r.lifecycle_status))
+                print("  {} | {} | {} | {}".format(r.mpn, r.manufacturer, r.category, ""))
         elif cmd == "stats":
             for cat, cnt in sorted(finder.stats().items()):
                 print("  {:<30} {}".format(cat, cnt))
