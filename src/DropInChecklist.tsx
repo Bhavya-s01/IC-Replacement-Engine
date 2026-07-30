@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle } from 'lucide-react'
+import { CheckCircle, XCircle, MinusCircle } from 'lucide-react'
 
 const T = {
   success: '#16A34A',
@@ -11,13 +11,17 @@ type DropInChecklistProps = {
   checklist: {
     package_match: boolean
     mounting_match: boolean
-    pin_count_match: boolean
+    pin_count_match: boolean | null
     required_specs_pass: boolean
-    lifecycle_active: boolean
-    target_package: string
-    candidate_package: string
-    target_pins: number | null
-    candidate_pins: number | null
+    p2p_match?: boolean
+    p2p_score?: number
+    p2p_details?: any
+    target_package?: string
+    candidate_package?: string
+    target_pins?: number | null
+    candidate_pins?: number | null
+    target_mounting?: string
+    candidate_mounting?: string
   }
   isDropIn: boolean
   notes?: string
@@ -30,33 +34,44 @@ export function DropInChecklist({ checklist, isDropIn, notes }: DropInChecklistP
     {
       label: 'Package Match',
       pass: checklist.package_match,
+      unknown: false,
       detail: checklist.package_match
-        ? checklist.target_package
-        : `${checklist.target_package} ≠ ${checklist.candidate_package}`,
+        ? checklist.target_package || 'Same'
+        : `${checklist.target_package || '?'} ≠ ${checklist.candidate_package || '?'}`,
     },
     {
       label: 'Mounting Type',
       pass: checklist.mounting_match,
+      unknown: false,
       detail: checklist.mounting_match ? 'Same' : 'Different',
     },
     {
       label: 'Pin Count',
-      pass: checklist.pin_count_match,
-      detail: checklist.pin_count_match
-        ? `${checklist.target_pins} pins`
-        : checklist.target_pins && checklist.candidate_pins
-          ? `${checklist.target_pins} ≠ ${checklist.candidate_pins} pins`
-          : 'Unknown',
+      pass: checklist.pin_count_match === true,
+      unknown: checklist.pin_count_match === null || checklist.pin_count_match === undefined,
+      detail:
+        checklist.pin_count_match === null || checklist.pin_count_match === undefined
+          ? 'Unknown'
+          : checklist.pin_count_match
+            ? `${checklist.target_pins} pins`
+            : `${checklist.target_pins ?? '?'} ≠ ${checklist.candidate_pins ?? '?'} pins`,
     },
     {
       label: 'Required Specs',
       pass: checklist.required_specs_pass,
+      unknown: false,
       detail: checklist.required_specs_pass ? 'All pass' : 'Some fail',
     },
     {
-      label: 'Lifecycle',
-      pass: checklist.lifecycle_active,
-      detail: checklist.lifecycle_active ? 'Active' : 'Not Active',
+      label: 'P2P Verified',
+      pass: checklist.p2p_match === true,
+      unknown: checklist.p2p_score === 0 && !checklist.p2p_match,
+      detail:
+        checklist.p2p_match
+          ? `${checklist.p2p_score}% match`
+          : checklist.p2p_score != null && checklist.p2p_score > 0
+            ? `${checklist.p2p_score}% — below threshold`
+            : 'No pinout data extracted',
     },
   ]
 
@@ -66,13 +81,17 @@ export function DropInChecklist({ checklist, isDropIn, notes }: DropInChecklistP
         Drop-In Checklist
       </p>
       <div className="grid grid-cols-5 gap-2">
-        {checks.map(({ label, pass: ok, detail }) => (
+        {checks.map(({ label, pass: ok, unknown, detail }) => (
           <div
             key={label}
             className="flex items-start gap-2 p-2 rounded-lg"
-            style={{ backgroundColor: ok ? '#F0FDF4' : '#FEF2F2' }}
+            style={{
+              backgroundColor: unknown ? '#F8FAFC' : ok ? '#F0FDF4' : '#FEF2F2',
+            }}
           >
-            {ok ? (
+            {unknown ? (
+              <MinusCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#94A3B8' }} />
+            ) : ok ? (
               <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: T.success }} />
             ) : (
               <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: T.danger }} />

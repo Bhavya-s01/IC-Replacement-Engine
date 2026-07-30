@@ -1,5 +1,5 @@
 import dellLogo from './assets/dell_logo.png'
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { api } from './api'
 import {
   Search, Cpu, BarChart3, ArrowRight, CheckCircle, XCircle,
@@ -474,7 +474,7 @@ export default function App() {
             <button onClick={() => setPage('home')} className="flex items-center gap-3">
               <img src={dellLogo} alt="Dell Technologies" className="h-5 w-auto" />
               <div className="h-4 w-px" style={{ backgroundColor: T.border }} />
-              <span className="text-[13px] font-medium" style={{ color: T.text }}>IC Alternative Finder</span>
+              <span className="text-[13px] font-medium" style={{ color: T.text }}>IC Replacement Engine</span>
             </button>
             <div className="h-4 w-px bg-neutral-200" />
             <nav className="flex items-center gap-0.5">
@@ -577,14 +577,14 @@ export default function App() {
                   <div className="flex items-center gap-2 mb-6">
                     <div className="h-px flex-1 max-w-[48px]" style={{ backgroundColor: '#0076CE' }} />
                     <span className="text-[11px] font-medium tracking-[0.2em] uppercase" style={{ color: '#60A5FA' }}>
-                      Engineering Tool
+                      Worldwide Procurement: Flat Pannel Monitors
                     </span>
                   </div>
                 </RevealSection>
 
                 <RevealSection delay={100}>
-                  <h1 className="text-5xl font-bold text-white leading-[1.1] mb-5 max-w-2xl">
-                    IC Alternative<br />Finder
+                  <h1 className="text-4xl font-bold text-white leading-[1.1] mb-5 max-w-2xl">
+                    Automated IC Compatiblity<br/>and Replacement Analysis Engine
                   </h1>
                 </RevealSection>
 
@@ -635,9 +635,9 @@ export default function App() {
 
                 <div className="grid grid-cols-4 gap-6">
                   {[
-                    { value: dashboard?.total.toLocaleString() || '33,710', label: 'Total Components', icon: 'microchip' },
+                    { value: dashboard?.total.toLocaleString() || '33,988', label: 'Total Components', icon: 'microchip' },
                     { value: String(categories.length || 22), label: 'IC Categories', icon: 'view-grid' },
-                    { value: (dashboard?.lifecycle_breakdown?.['Active'] || 0).toLocaleString(), label: 'Active Parts', icon: 'alert-check' },
+                    { value: (dashboard?.lifecycle_breakdown?.['Active'] || 13).toLocaleString(), label: 'Specs Per Category', icon: 'alert-check' },
                     { value: `${topMfrs.length || 10}+`, label: 'Manufacturers', icon: 'network-connected' },
                   ].map(({ value, label, icon }, i) => (
                     <RevealSection key={label} delay={i * 100}>
@@ -692,7 +692,7 @@ export default function App() {
                         </div>
                         <h3 className="text-lg font-semibold mb-2" style={{ color: T.text }}>View Datasheet</h3>
                         <p className="text-sm leading-relaxed mb-6" style={{ color: T.textSecondary }}>
-                          Browse the complete IC database with parametric specifications, lifecycle status,
+                          Browse the complete IC database with parametric specifications, drop in compatiblity
                           and manufacturer data across {categories.length || 22} categories.
                           View detailed electrical specs extracted from datasheets including PSRR,
                           dropout voltage, quiescent current, and more.
@@ -754,7 +754,7 @@ export default function App() {
                     What powers the engine
                   </h2>
                   <p className="text-sm mb-14 max-w-lg" style={{ color: '#64748B' }}>
-                    Technical comparison across multiple dimensions — no stock or pricing in compatibility scoring.
+                    Technical comparison across multiple dimensions, along with supply chain availability from the four FPM ODMs.
                   </p>
                 </RevealSection>
 
@@ -923,7 +923,7 @@ export default function App() {
         {page === 'methodology' && (
           <div className="space-y-6">
             <SectionHeader dds="book-open" title="Matching Rules & Methodology"
-              subtitle="How the IC Alternative Finder scores compatibility across categories" />
+              subtitle="How the IC Replacement Engine scores compatibility across categories" />
 
             <Card className="p-5">
               <h3 className="text-sm font-semibold text-slate-900 mb-3">How Scoring Works</h3>
@@ -985,7 +985,6 @@ export default function App() {
                                 <th className="text-center py-1 font-normal">Weight</th>
                                 <th className="text-left py-1 font-normal">Match Type</th>
                                 <th className="text-center py-1 font-normal">Tolerance</th>
-                                <th className="text-center py-1 font-normal">Required</th>
                               </tr></thead>
                               <tbody>
                                 {rule.specs.sort((a, b) => b.weight - a.weight).map(spec => (
@@ -1008,16 +1007,12 @@ export default function App() {
                                     <td className="py-1.5 text-center text-slate-500">
                                       {spec.match_type === 'numeric_close' ? `±${spec.tolerance_pct}%` : '—'}
                                     </td>
-                                    <td className="py-1.5 text-center">
-                                      {spec.required ? <CheckCircle className="w-4 h-4 inline" style={{ color: T.danger }} />
-                                        : <span className="text-slate-300">—</span>}
-                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
                             </table>
                             <p className="text-[10px] text-slate-400 mt-2">
-                              <span className="text-red-500 font-bold">*</span> = required (fail = candidate disqualified)
+                              All specs are compulsorily compared · Score = matched points / max possible × 100%
                             </p>
                           </div>
 
@@ -1060,7 +1055,7 @@ export default function App() {
             <div className="grid grid-cols-4 gap-4">
               <KpiCard label="Total Components" value={dashboard.total.toLocaleString()} icon={Database} />
               <KpiCard label="Categories" value={Object.keys(dashboard.categories).length} icon={Layers} />
-              <KpiCard label="Active Parts" value={(dashboard.lifecycle_breakdown['Active'] || 0).toLocaleString()} icon={CheckCircle} />
+              <KpiCard label="Specs per Category" value="8–13" icon={BarChart3} />
               <KpiCard label="Manufacturers" value={topMfrs.length + '+'} icon={Activity} />
             </div>
             <div className="grid grid-cols-5 gap-6">
@@ -1078,16 +1073,19 @@ export default function App() {
                 </ResponsiveContainer>
               </Card>
               <Card className="col-span-2 p-5">
-                <h3 className="text-sm font-semibold text-slate-900 mb-4">Lifecycle Status</h3>
+                <h3 className="text-sm font-semibold text-slate-900 mb-4">Top Manufacturers</h3>
                 <ResponsiveContainer width="100%" height={380}>
-                  <PieChart>
-                    <Pie data={Object.entries(dashboard.lifecycle_breakdown).map(([name, value]) => ({ name, value }))}
-                      cx="50%" cy="45%" outerRadius={100} innerRadius={55} dataKey="value" paddingAngle={2} strokeWidth={0}>
-                      {Object.keys(dashboard.lifecycle_breakdown).map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Pie>
+                  <BarChart data={topMfrs.slice(0, 10)} margin={{ bottom: 80 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                    <XAxis dataKey="manufacturer" tick={{ fill: T.textMuted, fontSize: 9 }} angle={-45} textAnchor="end" />
+                    <YAxis tick={{ fill: T.textMuted, fontSize: 10 }} />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Legend wrapperStyle={{ fontSize: 11, color: T.textMuted }} />
-                  </PieChart>
+                    <Bar dataKey="count" fill={T.primary} radius={[4, 4, 0, 0]}>
+                      {topMfrs.slice(0, 10).map((_: any, i: number) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               </Card>
             </div>
@@ -1208,13 +1206,24 @@ export default function App() {
               </Card>
             )}
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold text-slate-900">{alternatives.length} Compatible Alternatives</p>
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <label>Min:</label>
-                <input type="range" min={0} max={90} value={minCompat} onChange={e => setMinCompat(Number(e.target.value))} className="w-20" />
-                <span className="font-mono w-8">{minCompat}%</span>
-                <button onClick={() => selectPart(selectedPart.mpn)} className="px-3 py-1 rounded-md text-xs font-medium ml-2 border border-slate-200 hover:bg-slate-50"
-                  style={{ color: T.primary }}><RefreshCw className="w-3 h-3 inline mr-1" />Refresh</button>
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-semibold text-slate-900">{alternatives.length} Compatible Alternatives</p>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                  <input type="checkbox" id="supplier-filter"
+                        className="rounded border-slate-300"
+                        onChange={(e) => {
+                          const sorted = [...alternatives].sort((a, b) => {
+                            if (e.target.checked) {
+                              const aHas = (a as any).has_supply_chain ? 1 : 0
+                              const bHas = (b as any).has_supply_chain ? 1 : 0
+                              if (bHas !== aHas) return bHas - aHas
+                            }
+                            return b.compatibility_pct - a.compatibility_pct
+                          })
+                          setAlternatives(sorted)
+                        }} />
+                  Supplier approved first
+                </label>
               </div>
             </div>
             {alternatives.map((alt, idx) => (
@@ -1227,6 +1236,12 @@ export default function App() {
                       <span className="text-xs font-bold text-slate-400">#{idx + 1}</span>
                       <span className="font-mono text-sm font-semibold" style={{ color: T.primary }}>{alt.mpn}</span>
                       {alt.is_drop_in && <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-emerald-50 text-emerald-600 uppercase tracking-wider">Drop-In</span>}
+                      {(alt as any).has_supply_chain && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider"
+                              style={{ backgroundColor: '#EFF6FF', color: '#1D4ED8' }}>
+                          Supplier Approved
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 truncate">{alt.description}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">{alt.manufacturer}</p>
@@ -1247,44 +1262,48 @@ export default function App() {
                         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
                           Drop-In Checklist
                         </p>
-                        <div className="grid grid-cols-4 gap-2">
-                          {[
-                            {
-                              label: 'Package Match',
-                              pass: alt.drop_in_checklist.package_match,
-                              detail: alt.drop_in_checklist.package_match
-                                ? alt.drop_in_checklist.target_package
-                                : (alt.drop_in_checklist.target_package || '') + ' \u2260 ' + (alt.drop_in_checklist.candidate_package || '')
-                            },
-                            {
-                              label: 'Mounting Type',
-                              pass: alt.drop_in_checklist.mounting_match,
-                              detail: alt.drop_in_checklist.mounting_match ? 'Same' : 'Different'
-                            },
-                            {
-                              label: 'Required Specs',
-                              pass: alt.drop_in_checklist.required_specs_pass,
-                              detail: alt.drop_in_checklist.required_specs_pass ? 'All pass' : 'Some fail'
-                            },
-                            {
-                              label: 'Lifecycle',
-                              
-                              pass: alt.drop_in_checklist.lifecycle_active,
-                              detail: alt.lifecycle_status || 'Unknown'
-                            },
-                          ].map(({ label, pass: ok, detail }) => (
-                            <div key={label}  className="flex items-start gap-2 p-2 rounded"
-                                 style={{ backgroundColor: ok ? '#F0FDF4' : '#FEF2F2' }}>
-                              {ok
-                                ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
-                                : <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#DC2626' }} />}
-                              <div>
-                                <p className="text-[11px] font-medium text-slate-700">{label}</p>
-                                <p className="text-[10px] text-slate-500">{detail}</p>
-                              </div>
+                        <div className="grid grid-cols-5 gap-2">
+                        {[
+                          {
+                            label: 'Package Match',
+                            pass: alt.drop_in_checklist.package_match,
+                            detail: alt.drop_in_checklist.package_match
+                              ? alt.drop_in_checklist.target_package
+                              : (alt.drop_in_checklist.target_package || '') + ' ≠ ' + (alt.drop_in_checklist.candidate_package || '')
+                          },
+                          {
+                            label: 'Mounting Type',
+                            pass: alt.drop_in_checklist.mounting_match,
+                            detail: alt.drop_in_checklist.mounting_match ? 'Same' : 'Different'
+                          },
+                          {
+                            label: 'Pin Count',
+                            pass: alt.drop_in_checklist.pin_count_match === true,
+                            detail:
+                              alt.drop_in_checklist.pin_count_match == null
+                                ? 'Unknown'
+                                : alt.drop_in_checklist.pin_count_match
+                                  ? `${alt.drop_in_checklist.target_pins} pins`
+                                  : `${alt.drop_in_checklist.target_pins ?? '?'} ≠ ${alt.drop_in_checklist.candidate_pins ?? '?'}`
+                          },
+                          {
+                            label: 'Required Specs',
+                            pass: alt.drop_in_checklist.required_specs_pass,
+                            detail: alt.drop_in_checklist.required_specs_pass ? 'All pass' : 'Some fail'
+                          }
+                        ].map(({ label, pass: ok, detail }) => (
+                          <div key={label} className="flex items-start gap-2 p-2 rounded"
+                              style={{ backgroundColor: ok ? '#F0FDF4' : '#FEF2F2' }}>
+                            {ok
+                              ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
+                              : <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#DC2626' }} />}
+                            <div>
+                              <p className="text-[11px] font-medium text-slate-700">{label}</p>
+                              <p className="text-[10px] text-slate-500">{detail}</p>
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        ))}
+                      </div>
                         <div className="mt-2 px-3 py-2 rounded text-xs"
                              style={{
                                backgroundColor: alt.is_drop_in ? '#F0FDF4' : '#FFFBEB',
@@ -1347,64 +1366,64 @@ export default function App() {
                               <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
                                 Supply Chain Data
                               </p>
-                              <div className="grid grid-cols-3 gap-3">
+                              <div className="space-y-3">
                                 {supplyChainData[alt.mpn].entries.map((entry: any, i: number) => (
-                                  <React.Fragment key={i}>
-                                    <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                      <p className="text-[10px] text-slate-400 uppercase font-medium">Sourcing</p>
-                                      <p className="text-sm font-semibold mt-1" style={{
+                                  <div key={i} className="border rounded-lg p-4" style={{ borderColor: T.border }}>
+                                    {/* ODM Header — prominently displayed */}
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider"
+                                              style={{ backgroundColor: '#EFF6FF', color: '#1D4ED8' }}>
+                                          {entry.odm || 'Unknown ODM'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400">
+                                          Data dated {entry.template_date || 'N/A'}
+                                        </span>
+                                      </div>
+                                      <span className="text-sm font-semibold" style={{
                                         color: (entry.sourcing || '').toLowerCase().includes('multi') ? T.success
-                                             : (entry.sourcing || '').toLowerCase() === 'sole' ? T.danger
-                                             : T.warning
-                                      }}>{entry.sourcing || 'Unknown'}</p>
+                                            : (entry.sourcing || '').toLowerCase() === 'sole' ? T.danger
+                                            : T.warning
+                                      }}>
+                                        {entry.sourcing || 'Unknown'}
+                                      </span>
                                     </div>
-                                    {entry.lead_time_days && (
-                                      <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                        <p className="text-[10px] text-slate-400 uppercase font-medium">Lead Time</p>
-                                        <p className="text-sm font-semibold mt-1">{entry.lead_time_days} days</p>
+
+                                    {/* Key Info — 3 columns, no fab sites, no repeated pin count */}
+                                    <div className="grid grid-cols-3 gap-3">
+                                      {entry.lead_time_days && (
+                                        <div className="p-2 rounded bg-slate-50">
+                                          <p className="text-[10px] text-slate-400 uppercase font-medium">Lead Time</p>
+                                          <p className="text-sm font-semibold mt-0.5">{entry.lead_time_days} days</p>
+                                        </div>
+                                      )}
+                                      {entry.moq && (
+                                        <div className="p-2 rounded bg-slate-50">
+                                          <p className="text-[10px] text-slate-400 uppercase font-medium">MOQ</p>
+                                          <p className="text-sm font-semibold mt-0.5">{Number(entry.moq).toLocaleString()}</p>
+                                        </div>
+                                      )}
+                                      <div className="p-2 rounded bg-slate-50">
+                                        <p className="text-[10px] text-slate-400 uppercase font-medium">Dual Fab</p>
+                                        <p className="text-sm font-semibold mt-0.5" style={{
+                                          color: entry.dual_fab_plan === 'Y' ? T.success : T.warning
+                                        }}>{entry.dual_fab_plan === 'Y' ? 'Yes' : 'No'}</p>
                                       </div>
-                                    )}
-                                    {entry.moq && (
-                                      <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                        <p className="text-[10px] text-slate-400 uppercase font-medium">MOQ</p>
-                                        <p className="text-sm font-semibold mt-1">{Number(entry.moq).toLocaleString()}</p>
-                                      </div>
-                                    )}
-                                    {entry.pin_count && (
-                                      <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                        <p className="text-[10px] text-slate-400 uppercase font-medium">Pin Count</p>
-                                        <p className="text-sm font-semibold mt-1">{entry.pin_count} pins</p>
-                                      </div>
-                                    )}
-                                    <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                      <p className="text-[10px] text-slate-400 uppercase font-medium">Dual Fab</p>
-                                      <p className="text-sm font-semibold mt-1" style={{
-                                        color: entry.dual_fab_plan === 'Y' ? T.success : T.warning
-                                      }}>{entry.dual_fab_plan === 'Y' ? 'Yes' : 'No'}</p>
                                     </div>
-                                    {entry.fab1 && (
-                                      <div className="p-3 rounded bg-white border" style={{ borderColor: T.border }}>
-                                        <p className="text-[10px] text-slate-400 uppercase font-medium">Primary Fab</p>
-                                        <p className="text-xs font-medium mt-1">{entry.fab1.supplier}</p>
-                                        <p className="text-[10px] text-slate-500">{entry.fab1.country}</p>
-                                      </div>
-                                    )}
+
+                                    {/* P2P Solution — if available */}
                                     {entry.p2p_solution && (
-                                      <div className="p-3 rounded border col-span-3"
-                                           style={{ borderColor: '#BBF7D0', backgroundColor: T.successBg }}>
+                                      <div className="mt-3 p-3 rounded border col-span-3"
+                                          style={{ borderColor: '#BBF7D0', backgroundColor: T.successBg }}>
                                         <p className="text-[10px] uppercase font-medium" style={{ color: T.success }}>
                                           P2P Solution Available
                                         </p>
-                                        <p className="text-xs font-medium mt-1" style={{ color: T.success }}>
+                                        <p className="text-xs font-medium mt-0.5" style={{ color: T.success }}>
                                           {entry.p2p_solution.supplier}: {entry.p2p_solution.mpn}
                                         </p>
                                       </div>
                                     )}
-                                    <div className="col-span-3 flex justify-between text-[10px] text-slate-400 italic mt-1">
-                                      <span>ODM: {entry.odm}</span>
-                                      <span>* Based on template data dated {entry.template_date}</span>
-                                    </div>
-                                  </React.Fragment>
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -1441,7 +1460,7 @@ export default function App() {
                   <th className="text-left px-4 py-2.5 font-mono font-medium" style={{ color: T.accent }}>{cmpResult.part_b.mpn}</th>
                   <th className="text-center px-4 py-2.5 font-medium">Match</th>
                 </tr></thead><tbody>
-                  {['manufacturer', 'category', 'package', 'mounting_type', 'lifecycle_status'].map(field => {
+                  {['manufacturer', 'category', 'package', 'mounting_type'].map(field => {
                     const va = cmpResult.part_a[field] || '-', vb = cmpResult.part_b[field] || '-'
                     const match = va.toLowerCase() === vb.toLowerCase()
                     return <tr key={field} className="border-b" style={{ borderColor: T.border }}>
@@ -1500,7 +1519,7 @@ export default function App() {
 
       <footer className="border-t px-6 py-4 mt-8" style={{ borderColor: T.border }}>
         <div className="max-w-[1400px] mx-auto flex justify-between items-center">
-          <span className="text-xs text-slate-400">IC Alternative Finder · {dashboard?.total.toLocaleString() || '...'} components · {Object.keys(dashboard?.categories || {}).length} categories</span>
+          <span className="text-xs text-slate-400">IC Replacement Engine · {dashboard?.total.toLocaleString() || '...'} components · {Object.keys(dashboard?.categories || {}).length} categories</span>
           <span className="text-xs text-slate-400">© 2026 Dell Technologies. All rights reserved.</span>
         </div>
       </footer>
