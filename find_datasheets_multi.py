@@ -13,6 +13,8 @@ import time
 import logging
 import argparse
 
+from utils.datasheet_download import download_validated_datasheet
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s")
 log = logging.getLogger("find_ds_multi")
@@ -25,6 +27,22 @@ except ImportError:
     log.error("Playwright not installed. Run: pip install playwright && python -m playwright install msedge")
 
 DB_PATH = "ic_database.db"
+
+
+def validated_candidate(result, mpn):
+    """Return a candidate only after its downloaded document identifies the MPN.
+
+    Search result pages frequently expose family, compliance, or neighbouring
+    part PDFs.  A URL is never written to the database merely because it ends
+    in ``.pdf``.
+    """
+    if not result or not result.get("datasheet_url"):
+        return None, None
+    pdf_path = download_validated_datasheet(result["datasheet_url"], mpn)
+    if not pdf_path:
+        log.info("  Rejected unverified candidate for %s from %s", mpn, result.get("source"))
+        return None, None
+    return result, pdf_path
 
 
 def search_lcsc(page, mpn):
@@ -163,37 +181,64 @@ def search_google_datasheet(page, mpn):
     return None
 
 
-def download_datasheet(url, mpn):
-    """Download a datasheet PDF to datasheets/ folder."""
-    import requests
+def repair_component(mpn):
+    """Replace a bad component URL using validated multi-source search."""
     import os
+    from finder_extras.llm_parser import _is_valid_datasheet
 
-    os.makedirs("datasheets", exist_ok=True)
-    safe_name = re.sub(r'[^\w\-.]', '_', mpn)
-    filepath = "datasheets/{}.pdf".format(safe_name)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    component = conn.execute(
+        "SELECT id, datasheet_url FROM components "
+        "WHERE manufacturer_part_number = ? LIMIT 1", (mpn,)
+    ).fetchone()
+    if not component:
+        log.error("Component not found: %s", mpn)
+        conn.close()
+        return False
 
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 10000:
-        return filepath
+    search_functions = [
+        ("LCSC", search_lcsc),
+        ("Alldatasheet", search_alldatasheet),
+        ("Datasheet4U", search_datasheet4u),
+        ("Google", search_google_datasheet),
+    ]
+    safe_name = re.sub(r"[^\w\-.]", "_", mpn)
+    cached = os.path.join("datasheets", safe_name + ".pdf")
+    if os.path.exists(cached):
+        try:
+            if not _is_valid_datasheet(cached, mpn):
+                os.remove(cached)
+        except OSError:
+            pass
 
-    try:
-        resp = requests.get(url, timeout=30, verify=False,
-                            headers={"User-Agent": "Mozilla/5.0"},
-                            stream=True)
-        if resp.status_code == 200:
-            with open(filepath, "wb") as f:
-                for chunk in resp.iter_content(8192):
-                    f.write(chunk)
-            size = os.path.getsize(filepath)
-            if size > 10000:
-                log.info("  Downloaded datasheets\\%s (%d KB)",
-                         os.path.basename(filepath), size // 1024)
-                return filepath
-            else:
-                os.remove(filepath)
-        return None
-    except Exception as e:
-        log.debug("  Download failed: %s", e)
-        return None
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, channel="msedge")
+        context = browser.new_context(user_agent="Mozilla/5.0")
+        page = context.new_page()
+        for source_name, search_fn in search_functions:
+            log.info("  Trying %s for %s", source_name, mpn)
+            result = search_fn(page, mpn)
+            if not result or not result.get("datasheet_url"):
+                continue
+            pdf_path = download_validated_datasheet(result["datasheet_url"], mpn)
+            if pdf_path and _is_valid_datasheet(pdf_path, mpn):
+                conn.execute(
+                    "UPDATE components SET datasheet_url = ? WHERE id = ?",
+                    (result["datasheet_url"], component["id"]),
+                )
+                conn.commit()
+                browser.close()
+                conn.close()
+                log.info("Repaired %s using %s: %s", mpn, source_name, result["datasheet_url"])
+                return True
+        browser.close()
+
+    conn.execute("UPDATE components SET datasheet_url = '' WHERE id = ?", (component["id"],))
+    conn.commit()
+    conn.close()
+    log.warning("No validated datasheet found for %s; URL cleared", mpn)
+    return False
 
 
 def enrich_with_parser(conn, comp_id, mpn, pdf_path, package, category):
@@ -222,11 +267,24 @@ def enrich_with_parser(conn, comp_id, mpn, pdf_path, package, category):
                 )
                 count += 1
 
+        # A few regex matches are useful interim data, but they are not a
+        # completed enrichment if required replacement-rule fields are absent.
+        try:
+            from match_rules import get_rules
+            present = {name for name in specs if str(specs[name]).strip()}
+            missing = [
+                rule.spec_name for rule in get_rules(category).rules
+                if rule.required and not any(name in present for name in [rule.spec_name, *rule.aliases])
+            ]
+        except Exception:
+            missing = []
         conn.execute(
             "INSERT OR REPLACE INTO specifications "
-            "(component_id, spec_name, spec_value) VALUES (?, '_enriched', '1')",
-            (comp_id,)
+            "(component_id, spec_name, spec_value) VALUES (?, '_enriched', ?)",
+            (comp_id, '0' if missing else '1'),
         )
+        if missing:
+            log.info("  %s needs full enrichment; missing required specs: %s", mpn, ", ".join(missing))
         conn.commit()
         return count
 
@@ -314,7 +372,8 @@ def process_not_found(limit=30, enrich=True):
                     break
                 time.sleep(1)  # brief pause between sources
 
-            if result and result.get("datasheet_url"):
+            result, pdf_path = validated_candidate(result, mpn)
+            if result:
                 if existing:
                     # Update existing component with datasheet URL
                     conn.execute(
@@ -350,15 +409,13 @@ def process_not_found(limit=30, enrich=True):
                 conn.commit()
                 found += 1
 
-                # Download and extract specs
-                if enrich and comp_id:
-                    pdf_path = download_datasheet(result["datasheet_url"], mpn)
-                    if pdf_path:
-                        n = enrich_with_parser(conn, comp_id, mpn,
-                                               pdf_path, package, category)
-                        if n > 0:
-                            enriched += 1
-                            log.info("  Extracted %d specs", n)
+                # The same validated PDF is used for extraction.
+                if enrich and comp_id and pdf_path:
+                    n = enrich_with_parser(conn, comp_id, mpn,
+                                           pdf_path, package, category)
+                    if n > 0:
+                        enriched += 1
+                        log.info("  Extracted %d specs", n)
             else:
                 conn.execute(
                     "UPDATE datasheet_queue SET status = 'not_found_multi' WHERE id = ?",
@@ -388,7 +445,7 @@ def process_not_found(limit=30, enrich=True):
     ).fetchone()[0]
     overlap = conn.execute(
         "SELECT COUNT(DISTINCT sc.mpn) FROM supply_chain sc "
-        "INNER JOIN components c ON c.manufacturer_part_number = sc.mpn"
+        "INNER JOIN components c ON upper(trim(c.manufacturer_part_number)) = upper(trim(sc.mpn))"
     ).fetchone()[0]
 
     log.info("Queue: %d pending, %d found, %d exhausted", total_pending, total_found, total_not)
@@ -402,7 +459,15 @@ if __name__ == "__main__":
         description="Search LCSC, Alldatasheet, Datasheet4U, Google for datasheets"
     )
     parser.add_argument("--limit", type=int, default=30)
+    parser.add_argument("--repair-mpn", type=str,
+                        help="Replace one component's invalid datasheet URL")
     parser.add_argument("--no-enrich", action="store_true",
                         help="Skip spec extraction after download")
     args = parser.parse_args()
-    process_not_found(limit=args.limit, enrich=not args.no_enrich)
+    if args.repair_mpn:
+        if not PW_OK:
+            log.error("Playwright is required for repair")
+        else:
+            repair_component(args.repair_mpn)
+    else:
+        process_not_found(limit=args.limit, enrich=not args.no_enrich)

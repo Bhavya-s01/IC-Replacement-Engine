@@ -74,14 +74,14 @@ sc_unique = conn.execute("SELECT COUNT(DISTINCT mpn) FROM supply_chain").fetchon
 print("  Unique supply chain MPNs:    {:>8,}".format(sc_unique))
 
 overlap = conn.execute(
-    "SELECT COUNT(DISTINCT sc.mpn) FROM supply_chain sc INNER JOIN components c ON c.manufacturer_part_number = sc.mpn"
+    "SELECT COUNT(DISTINCT sc.mpn) FROM supply_chain sc INNER JOIN components c ON upper(trim(c.manufacturer_part_number)) = upper(trim(sc.mpn))"
 ).fetchone()[0]
 print("  Overlap with components:     {:>8,} / {} ({:.0f}%)".format(
     overlap, sc_unique, overlap*100/sc_unique if sc_unique else 0))
 
 sc_enriched = conn.execute(
     "SELECT COUNT(DISTINCT c.id) FROM components c "
-    "INNER JOIN supply_chain sc ON sc.mpn = c.manufacturer_part_number "
+    "INNER JOIN supply_chain sc ON upper(trim(sc.mpn)) = upper(trim(c.manufacturer_part_number)) "
     "INNER JOIN specifications s ON s.component_id = c.id "
     "WHERE s.spec_name = '_enriched' AND s.spec_value = '1'"
 ).fetchone()[0]

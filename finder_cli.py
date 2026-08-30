@@ -48,7 +48,9 @@ def print_alternatives(target, alts):
         print("    Manufacturer: {}".format(alt.manufacturer))
         print("    Description:  {}".format(alt.description[:60]))
         print("    Package:      {}".format(alt.package))
-        print("    Status:       {}".format("—"  # lifecycle removed))
+        # Lifecycle status is not part of MatchResult, so do not display a
+        # fabricated value here.
+        print("    Status:       N/A")
         print("    Score:        {:.1f} / {:.1f}".format(alt.total_score, alt.max_possible_score))
 
         if alt.spec_scores:

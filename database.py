@@ -116,7 +116,7 @@ class Database:
             self._conn.close()
             self._conn = None
 
-    def upsert_component(self, comp):
+    def upsert_component(self, comp, commit=True):
         conn = self._get_conn()
         conn.execute(
             """
@@ -180,14 +180,15 @@ class Database:
                 "INSERT INTO specifications (component_id, spec_name, spec_value) VALUES (?, ?, ?)",
                 (comp_id, name, value),
             )
-        conn.commit()
+        if commit:
+            conn.commit()
         return comp_id
 
     def bulk_upsert(self, components):
         count = 0
         with self.transaction():
             for comp in components:
-                self.upsert_component(comp)
+                self.upsert_component(comp, commit=False)
                 count += 1
         log.info("Bulk upserted %d components", count)
         return count

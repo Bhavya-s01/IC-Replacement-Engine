@@ -3,7 +3,9 @@ enrich_all.py — Enrich supply chain parts using LLM only (no regex).
 Validates extracted specs against expected ranges.
 
 Run:
-  $env:NVIDIA_API_KEY = "nvapi-YOUR-KEY"
+  $env:GROQ_API_KEY = "gsk_YOUR-KEY"        (fastest, tried first)
+  $env:GEMINI_API_KEY = "AIza-YOUR-KEY"     (accuracy fallback)
+  $env:NVIDIA_API_KEY = "nvapi-YOUR-KEY"    (last resort)
   python enrich_all.py --phase supply_chain
   python enrich_all.py --phase category --cat ldo_ic
 """
@@ -14,6 +16,7 @@ import time
 import logging
 import argparse
 import json
+import requests
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s")
@@ -27,6 +30,8 @@ DB_PATH = "ic_database.db"
 # ════════════════════════════════════════════
 # SPEC VALIDATION — catches garbage values
 # ════════════════════════════════════════════
+# These names must match the canonical names used by match_rules and the
+# active LLM validation layer; keep the keys in sync with the current data model.
 
 VALIDATION_RULES = {
     "Input Voltage Max":        {"min": 0.5,   "max": 200,    "unit": "V"},
@@ -55,32 +60,153 @@ VALIDATION_RULES = {
 def validate_spec(name, value):
     """Check if a spec value is within reasonable range. Returns True if valid."""
     try:
-        num = float(str(value).replace(",", ""))
-    except (ValueError, TypeError):
-        return True  # non-numeric specs are OK (e.g., "Fixed", "Positive")
+        from finder_extras.llm_parser import _validate_spec
+        valid, error = _validate_spec(name, str(value))
+        if not valid:
+            log.warning("  INVALID %s = %s (%s)", name, value, error)
+        return valid
+    except ImportError:
+        rule = VALIDATION_RULES.get(name)
+        if not rule:
+            return True
+        try:
+            num = float(str(value).replace(",", ""))
+        except (ValueError, TypeError):
+            return True
+        return rule["min"] <= num <= rule["max"]
 
-    rule = VALIDATION_RULES.get(name)
-    if not rule:
-        return True  # no rule = accept
 
-    if num < rule["min"] or num > rule["max"]:
-        log.warning("  INVALID %s = %s (expected %s-%s %s)",
-                     name, value, rule["min"], rule["max"], rule["unit"])
-        return False
-    return True
+def _rule_spec_names(category):
+    from match_rules import get_rules
+    names = []
+    for rule in get_rules(category or "").rules:
+        names.append((rule.spec_name, [rule.spec_name] + list(rule.aliases), rule.required))
+    return names
+
+
+def _missing_required_specs(conn, component_id, category):
+    rows = conn.execute(
+        "SELECT spec_name, spec_value FROM specifications "
+        "WHERE component_id = ? AND spec_name NOT LIKE '\\_%' ESCAPE '\\'",
+        (component_id,),
+    ).fetchall()
+    specs = {row[0]: str(row[1] or "").strip() for row in rows}
+    missing = []
+    for canonical, names, required in _rule_spec_names(category):
+        if required and not any(specs.get(name) not in (None, "", "-", "N/A") for name in names):
+            missing.append(canonical)
+    return missing
+
+
+def _verify_datasheet_url(url):
+    """Return (ok, reason) for a reachable PDF/HTML datasheet URL."""
+    try:
+        response = requests.get(
+            url,
+            timeout=20,
+            verify=False,
+            headers={"User-Agent": "Mozilla/5.0"},
+            stream=True,
+        )
+        content_type = response.headers.get("content-type", "").lower()
+        is_pdf = response.content[:5] == b"%PDF-"
+        is_html = "html" in content_type or response.text[:100].lower().find("<html") >= 0
+        if response.status_code >= 400:
+            return False, "HTTP {}".format(response.status_code)
+        if not (is_pdf or is_html):
+            return False, "unexpected content type {}".format(content_type or "unknown")
+        return True, "{} {}".format(response.status_code, "pdf" if is_pdf else "html")
+    except Exception as exc:
+        return False, str(exc).splitlines()[0][:120]
+
+
+def _reset_component_enrichment(conn, component_id):
+    """Remove parser-owned rows when metadata identifies exactly what it wrote."""
+    metadata = conn.execute(
+        "SELECT spec_value FROM specifications "
+        "WHERE component_id = ? AND spec_name = '_validation' "
+        "ORDER BY id DESC LIMIT 1",
+        (component_id,),
+    ).fetchone()
+    if metadata:
+        try:
+            names = json.loads(metadata[0]).get("stored_specs", [])
+            if names:
+                placeholders = ",".join("?" for _ in names)
+                conn.execute(
+                    "DELETE FROM specifications WHERE component_id = ? "
+                    "AND spec_name IN ({})".format(placeholders),
+                    [component_id] + names,
+                )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            log.warning("Could not read validation metadata for component %s", component_id)
+    conn.execute(
+        "DELETE FROM specifications WHERE component_id = ? "
+        "AND spec_name IN ('_enriched', '_validation')",
+        (component_id,),
+    )
+
+
+def reset_invalid_enrichment():
+    """Reset successful markers that fail required rules or URL verification."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT DISTINCT c.id, c.manufacturer_part_number, c.category, c.datasheet_url
+        FROM components c
+        JOIN specifications s ON s.component_id = c.id
+        WHERE s.spec_name = '_enriched' AND s.spec_value = '1'
+    """).fetchall()
+    reset = []
+    for row in rows:
+        missing = _missing_required_specs(conn, row["id"], row["category"])
+        url_ok, url_reason = _verify_datasheet_url(row["datasheet_url"] or "") if row["datasheet_url"] else (False, "no URL")
+        real_specs = conn.execute(
+            "SELECT COUNT(*) FROM specifications WHERE component_id = ? "
+            "AND spec_name NOT LIKE '\\_%' ESCAPE '\\'",
+            (row["id"],),
+        ).fetchone()[0]
+        reasons = []
+        if missing:
+            reasons.append("missing required: " + ", ".join(missing))
+        if real_specs == 0:
+            reasons.append("no extracted specs")
+        if not url_ok:
+            reasons.append("datasheet URL: " + url_reason)
+        if reasons:
+            _reset_component_enrichment(conn, row["id"])
+            reset.append((row["id"], row["manufacturer_part_number"], "; ".join(reasons)))
+    conn.commit()
+    conn.close()
+    print("Reset {} components".format(len(reset)))
+    for component_id, mpn, reason in reset:
+        print("{} {}: {}".format(component_id, mpn, reason))
 
 
 def get_llm_parser():
-    """Load LLM parser only — no regex fallback."""
-    api_key = os.environ.get("NVIDIA_API_KEY", "")
-    if not api_key:
-        log.error("Set NVIDIA_API_KEY: $env:NVIDIA_API_KEY = 'nvapi-YOUR-KEY'")
-        return None
-
+    """Load the parser, allowing its deterministic fallback when no LLM exists."""
     try:
-        from finder_extras.llm_parser import LLMDatasheetParser
+        # Import first: llm_parser loads the project-local .env file.
+        from finder_extras.llm_parser import (
+            LLMDatasheetParser, GROQ_API_KEY, GEMINI_API_KEY, NVIDIA_API_KEY,
+        )
         parser = LLMDatasheetParser()
-        log.info("LLM parser loaded (NVIDIA NIM)")
+        if GROQ_API_KEY:
+            provider = "Groq"
+        elif GEMINI_API_KEY:
+            provider = "Gemini"
+        elif NVIDIA_API_KEY:
+            provider = "NVIDIA NIM"
+        else:
+            provider = None
+
+        if provider:
+            log.info("LLM parser loaded (%s)", provider)
+        else:
+            log.warning(
+                "No LLM credentials configured; using deterministic datasheet parser. "
+                "Incomplete parts remain queued for later LLM enrichment."
+            )
         return parser
     except ImportError as e:
         log.error("Cannot import LLMDatasheetParser: %s", e)
@@ -121,6 +247,7 @@ def enrich_part(conn, parser, comp_id, mpn, url, package, category):
     # Validate and store
     stored = 0
     rejected = 0
+    stored_names = []
     for name, value in specs.items():
         if not validate_spec(name, value):
             rejected += 1
@@ -136,6 +263,7 @@ def enrich_part(conn, parser, comp_id, mpn, url, package, category):
                 (comp_id, name, str(value))
             )
             stored += 1
+            stored_names.append(name)
 
     # Mark as enriched
     conn.execute(
@@ -152,9 +280,23 @@ def enrich_part(conn, parser, comp_id, mpn, url, package, category):
             "extracted": len(specs),
             "stored": stored,
             "rejected": rejected,
-            "specs": list(specs.keys())
+            "stored_specs": stored_names
         }))
     )
+
+    missing_required = _missing_required_specs(conn, comp_id, category)
+    if missing_required:
+        conn.execute(
+            "INSERT OR REPLACE INTO specifications "
+            "(component_id, spec_name, spec_value) VALUES (?, '_enriched', '0')",
+            (comp_id,),
+        )
+        log.warning(
+            "  %s: incomplete enrichment; missing required specs: %s",
+            mpn, ", ".join(missing_required),
+        )
+        conn.commit()
+        return 0
 
     conn.commit()
     log.info("  %s: stored %d specs, rejected %d", mpn, stored, rejected)
@@ -171,15 +313,16 @@ def enrich_supply_chain(limit=999):
     conn.row_factory = sqlite3.Row
 
     parts = conn.execute("""
-        SELECT c.id, c.manufacturer_part_number, c.datasheet_url,
+        SELECT DISTINCT c.id, c.manufacturer_part_number, c.datasheet_url,
                c.package, c.category
         FROM components c
-        INNER JOIN supply_chain sc ON sc.mpn = c.manufacturer_part_number
+        INNER JOIN supply_chain sc ON upper(trim(sc.mpn)) = upper(trim(c.manufacturer_part_number))
         WHERE c.datasheet_url IS NOT NULL
           AND c.datasheet_url != ''
           AND c.id NOT IN (
               SELECT component_id FROM specifications
-              WHERE spec_name = '_enriched' AND spec_value = '1'
+              WHERE spec_name = '_enriched'
+                AND spec_value IN ('1', '0', 'error')
           )
         LIMIT ?
     """, (limit,)).fetchall()
@@ -237,7 +380,8 @@ def enrich_category(category, limit=999):
           AND c.datasheet_url != ''
           AND c.id NOT IN (
               SELECT component_id FROM specifications
-              WHERE spec_name = '_enriched' AND spec_value = '1'
+              WHERE spec_name = '_enriched'
+                AND spec_value IN ('1', '0', 'error')
           )
         LIMIT ?
     """, (category, limit)).fetchall()
@@ -277,7 +421,7 @@ def enrich_category(category, limit=999):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--phase", choices=["supply_chain", "category", "stats"],
+    p.add_argument("--phase", choices=["supply_chain", "category", "reset_invalid", "stats"],
                    default="stats")
     p.add_argument("--cat", type=str, default="ldo_ic",
                    help="Category to enrich (for --phase category)")
@@ -288,6 +432,8 @@ if __name__ == "__main__":
         enrich_supply_chain(limit=args.limit)
     elif args.phase == "category":
         enrich_category(args.cat, limit=args.limit)
+    elif args.phase == "reset_invalid":
+        reset_invalid_enrichment()
     elif args.phase == "stats":
         conn = sqlite3.connect(DB_PATH)
         total = conn.execute("SELECT COUNT(*) FROM components").fetchone()[0]
@@ -302,13 +448,13 @@ if __name__ == "__main__":
         ).fetchone()[0]
         sc_enriched = conn.execute("""
             SELECT COUNT(DISTINCT c.id) FROM components c
-            INNER JOIN supply_chain sc ON sc.mpn = c.manufacturer_part_number
+            INNER JOIN supply_chain sc ON upper(trim(sc.mpn)) = upper(trim(c.manufacturer_part_number))
             INNER JOIN specifications s ON s.component_id = c.id
             WHERE s.spec_name = '_enriched' AND s.spec_value = '1'
         """).fetchone()[0]
         sc_total = conn.execute("""
             SELECT COUNT(DISTINCT sc.mpn) FROM supply_chain sc
-            INNER JOIN components c ON c.manufacturer_part_number = sc.mpn
+            INNER JOIN components c ON upper(trim(c.manufacturer_part_number)) = upper(trim(sc.mpn))
         """).fetchone()[0]
 
         cats = conn.execute("""

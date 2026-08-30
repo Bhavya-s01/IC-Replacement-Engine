@@ -7,19 +7,18 @@ Run: python fetch_datasheets.py --limit 30
 """
 
 import sqlite3
-import os
 import re
 import time
 import logging
 import argparse
+
+from utils.datasheet_download import download_validated_datasheet
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s")
 log = logging.getLogger("fetch_ds")
 
 DB_PATH = "ic_database.db"
-DATASHEET_DIR = "datasheets"
-
 try:
     from playwright.sync_api import sync_playwright
     PW_OK = True
@@ -117,38 +116,6 @@ def extract_from_page(page, mpn):
     return result if result["datasheet_url"] else None
 
 
-def download_datasheet(url, mpn):
-    """Download a datasheet PDF."""
-    import requests
-
-    os.makedirs(DATASHEET_DIR, exist_ok=True)
-    safe_name = re.sub(r'[^\w\-.]', '_', mpn)
-    filepath = os.path.join(DATASHEET_DIR, "{}.pdf".format(safe_name))
-
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 10000:
-        log.info("  Already downloaded: %s", filepath)
-        return filepath
-
-    try:
-        resp = requests.get(url, timeout=30, verify=False,
-                            headers={"User-Agent": "Mozilla/5.0"},
-                            stream=True)
-        if resp.status_code == 200:
-            with open(filepath, "wb") as f:
-                for chunk in resp.iter_content(8192):
-                    f.write(chunk)
-            size = os.path.getsize(filepath)
-            if size > 10000:
-                log.info("  Downloaded %s (%d KB)", filepath, size // 1024)
-                return filepath
-            else:
-                os.remove(filepath)
-        return None
-    except Exception as e:
-        log.debug("  Download failed: %s", e)
-        return None
-
-
 def enrich_with_llm(conn, comp_id, mpn, pdf_path, package, category):
     """Parse datasheet with LLM and store extracted specs."""
     parser = None
@@ -205,10 +172,16 @@ def run(limit=30, enrich=True):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    pending = conn.execute(
-        "SELECT * FROM datasheet_queue WHERE status = 'pending' LIMIT ?",
-        (limit,)
-    ).fetchall()
+    pending = conn.execute("""
+        SELECT q.*
+        FROM datasheet_queue q
+        LEFT JOIN supply_chain sc
+          ON upper(trim(sc.mpn)) = upper(trim(q.mpn))
+        WHERE q.status = 'pending'
+        GROUP BY q.id
+        ORDER BY MAX(CASE WHEN sc.id IS NOT NULL THEN 1 ELSE 0 END) DESC, q.id
+        LIMIT ?
+    """, (limit,)).fetchall()
 
     log.info("Processing %d parts from datasheet queue", len(pending))
 
@@ -240,12 +213,13 @@ def run(limit=30, enrich=True):
 
             log.info("Searching DigiKey for: %s", mpn)
 
-            # Check if already in components table
+            # Existing components without a URL must still be fetched. Only
+            # skip a queue item when the existing URL is already populated.
             existing = conn.execute(
-                "SELECT id FROM components WHERE manufacturer_part_number = ?",
+                "SELECT id, datasheet_url FROM components WHERE manufacturer_part_number = ?",
                 (mpn,)
             ).fetchone()
-            if existing:
+            if existing and existing["datasheet_url"]:
                 conn.execute(
                     "UPDATE datasheet_queue SET status = 'already_exists' WHERE id = ?",
                     (item["id"],)
@@ -256,49 +230,48 @@ def run(limit=30, enrich=True):
             # Search DigiKey via Edge
             result = search_digikey(page, mpn)
 
-            if result and result.get("datasheet_url"):
-                # Add to components table
-                conn.execute("""
-                    INSERT OR IGNORE INTO components (
-                        manufacturer_part_number, manufacturer, description,
-                        category, datasheet_url, source,
-                        package, lifecycle_status, stock, unit_price
-                    ) VALUES (?, ?, ?, ?, ?, 'template', ?, 'Unknown', 0, 0.0)
-                """, (
-                    mpn,
-                    result.get("manufacturer", ""),
-                    result.get("description", ""),
-                    category,
-                    result["datasheet_url"],
-                    result.get("package", package),
-                ))
-                conn.commit()
+            pdf_path = (
+                download_validated_datasheet(result["datasheet_url"], mpn)
+                if result else None
+            )
+            if result and pdf_path:
+                if existing:
+                    conn.execute(
+                        "UPDATE components SET datasheet_url = ? WHERE id = ?",
+                        (result["datasheet_url"], existing["id"]),
+                    )
+                    comp_id = existing["id"]
+                else:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO components (
+                            manufacturer_part_number, manufacturer, description,
+                            category, datasheet_url, source,
+                            package, lifecycle_status, stock, unit_price
+                        ) VALUES (?, ?, ?, ?, ?, 'template', ?, 'Unknown', 0, 0.0)
+                    """, (
+                        mpn,
+                        result.get("manufacturer", ""),
+                        result.get("description", ""),
+                        category,
+                        result["datasheet_url"],
+                        result.get("package", package),
+                    ))
+                    comp = conn.execute(
+                        "SELECT id FROM components WHERE manufacturer_part_number = ?",
+                        (mpn,),
+                    ).fetchone()
+                    comp_id = comp["id"] if comp else None
 
-                conn.execute(
-                    "UPDATE datasheet_queue SET status = 'found' WHERE id = ?",
-                    (item["id"],)
-                )
+                conn.execute("UPDATE datasheet_queue SET status = 'found' WHERE id = ?", (item["id"],))
                 conn.commit()
                 found += 1
-                log.info("  Found: %s", result["datasheet_url"][:70])
+                log.info("  Validated URL: %s", result["datasheet_url"][:70])
 
-                # Download + LLM enrich
-                if enrich:
-                    pdf_path = download_datasheet(result["datasheet_url"], mpn)
-                    if pdf_path:
-                        comp = conn.execute(
-                            "SELECT id FROM components "
-                            "WHERE manufacturer_part_number = ?",
-                            (mpn,)
-                        ).fetchone()
-                        if comp:
-                            n = enrich_with_llm(
-                                conn, comp["id"], mpn, pdf_path,
-                                package, category
-                            )
-                            if n > 0:
-                                enriched += 1
-                                log.info("  Extracted %d specs", n)
+                if enrich and comp_id:
+                    n = enrich_with_llm(conn, comp_id, mpn, pdf_path, package, category)
+                    if n > 0:
+                        enriched += 1
+                        log.info("  Extracted %d specs", n)
             else:
                 conn.execute(
                     "UPDATE datasheet_queue SET status = 'not_found' WHERE id = ?",

@@ -325,8 +325,7 @@ class AlternativeFinder:
         total_score += ts; max_score += tm
 
         # Lifecycle (active = bonus)
-    # [REMOVED] lm = rules.lifecycle_weight  # lifecycle not used
-                # Lifecycle scoring disabled (technical-only mode)
+        # Lifecycle scoring disabled in this technical-only mode.
         ls = 0
         lm = 0
 
@@ -335,9 +334,6 @@ class AlternativeFinder:
         result.max_possible_score = max_score
         result.compatibility_pct = (total_score / max_score * 100) if max_score > 0 else 0
 
-        all_req_pass = all(
-            v["status"] != "FAIL" for v in result.spec_scores.values() if v.get("required")
-        )
         # ── PIN COUNT CHECK (from LLM extraction, not package string) ──
         target_pins = None
         cand_pins = None

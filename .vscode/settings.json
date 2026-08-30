@@ -1,0 +1,5 @@
+﻿{
+  "continue.enableTabAutocomplete": true,
+  "continue.telemetryEnabled": false,
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe"
+}

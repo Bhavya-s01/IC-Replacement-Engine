@@ -8,3 +8,4 @@ exports/
 .agents/
 node_modules/
 dist/
+.env
