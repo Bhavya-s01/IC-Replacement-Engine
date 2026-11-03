@@ -11,7 +11,7 @@ type DropInChecklistProps = {
   checklist: {
     package_match: boolean
     mounting_match: boolean
-    pin_count_match: boolean | null
+    pin_count_match?: boolean | null
     required_specs_pass: boolean
     p2p_match?: boolean
     p2p_score?: number

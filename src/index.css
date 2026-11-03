@@ -7,13 +7,13 @@
   font-style: normal;
 }
 
-@import "@dds/react/css/dds-tokens.css";
-@import "@dds/react/css/dds-fonts.css";
-@import "@dds/react/css/dds-typography.css";
-@import "@dds/react/css/dds-icons.css";
-@import "@dds/react/css/dds-styles.css";
-@import "@dds/react/css/dds-helpers.css";
-@import "@dds/react/css/dds-components.css";
+@import "./dds/css/dds-tokens.css";
+@import "./dds/css/dds-fonts.css";
+@import "./dds/css/dds-typography.css";
+@import "./dds/css/dds-icons.css";
+@import "./dds/css/dds-styles.css";
+@import "./dds/css/dds-helpers.css";
+@import "./dds/css/dds-components.css";
 
 /* Tailwind after DDS */
 @import "tailwindcss";

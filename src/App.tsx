@@ -1,17 +1,18 @@
 import dellLogo from './assets/dell_logo.png'
 import React, { useState, useEffect, useRef } from 'react'
 import { api } from './api'
+import { DropInChecklist } from './DropInChecklist'
 import {
-  Search, Cpu, BarChart3, ArrowRight, CheckCircle, XCircle,
-  AlertCircle, Layers, Zap, Database,
-  RefreshCw, ExternalLink, ChevronDown, Home,
-  FileText, Wrench, Activity, Shield, GitCompare, Award,
-  Target, Network, BookOpen
+  Search, BarChart3, ArrowRight, CheckCircle, XCircle,
+  AlertCircle, Layers, Database,
+  ExternalLink, ChevronDown,
+  Activity,
+  Network, BookOpen
 } from 'lucide-react'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, ScatterChart, Scatter, ZAxis,
+  Cell, ScatterChart, Scatter, ZAxis,
   CartesianGrid
 } from 'recharts'
 
@@ -38,6 +39,8 @@ type Alternative = PartDetail & {
   drop_in_checklist?: {
     package_match: boolean; mounting_match: boolean;
     required_specs_pass: boolean; lifecycle_active: boolean;
+    pin_count_match?: boolean | null; p2p_match?: boolean; p2p_score?: number;
+    target_pins?: number | null; candidate_pins?: number | null;
     target_package: string; candidate_package: string;
   };
 }
@@ -161,24 +164,6 @@ function DdsIcon({ name, size = 24, color, className = '' }: {
       className={`dds__icon dds__icon--${name} ${className}`}
       style={{ fontSize: size, color: color || 'inherit' }}
       aria-hidden="true"
-    />
-  )
-}
-
-// Lucide icon wrapper with Dell stroke weights [3]
-function DellIcon({ icon: Icon, size = 24, color = '#0076CE', className = '' }: {
-  icon: any; size?: 16 | 24 | 32 | 40 | 48; color?: string; className?: string
-}) {
-  const strokeMap: Record<number, number> = {
-    16: 1, 24: 1.5, 32: 2, 40: 2.5, 48: 3
-  }
-  return (
-    <Icon
-      className={className}
-      width={size}
-      height={size}
-      style={{ color }}
-      strokeWidth={strokeMap[size] || 1.5}
     />
   )
 }
@@ -385,8 +370,6 @@ function CompatibilityGraph({ target, alternatives }: { target: PartDetail; alte
 // ═══════════════════════════════════════════
 export default function App() {
   type Page = 'home' | 'methodology' | 'dashboard' | 'browse' | 'search' | 'alternatives' | 'compare' | 'graph'
-  // Temporary value to keep a stale fragment from rendering until it is removed.
-  const entry = { dual_fab_plan: '' }
   const [page, setPage] = useState<Page>('home')
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Part[]>([])
@@ -402,20 +385,19 @@ export default function App() {
   const [browseCat, setBrowseCat] = useState('')
   const [browseParts, setBrowseParts] = useState<any[]>([])
   const [browseTotal, setBrowseTotal] = useState(0)
-  const [minCompat, setMinCompat] = useState(30)
+  const minCompat = 30
   const [expandedAlt, setExpandedAlt] = useState<number | null>(null)
   const [matchingRules, setMatchingRules] = useState<MatchingRule[]>([])
   const [expandedRule, setExpandedRule] = useState<string | null>(null)
   const [supplyChainData, setSupplyChainData] = useState<Record<string, any>>({})
   const [showSupplyChain, setShowSupplyChain] = useState<number | null>(null)
-  useEffect(() => { loadDashboard() }, [])
-
   const loadDashboard = async () => {
     try {
       const [d, c, m] = await Promise.all([api.dashboard(), api.categories(), api.topManufacturers()])
       setDashboard(d.data); setCategories(c.data); setTopMfrs(m.data)
     } catch (e) { console.error(e) }
   }
+  useEffect(() => { loadDashboard() }, [])
   const loadMatchingRules = async () => {
     try { const r = await api.matchingRules(); setMatchingRules(r.data) }
     catch (e) { console.error(e) }
@@ -1256,66 +1238,9 @@ export default function App() {
 
                   
                     <>
-                    {/* DROP-IN CHECKLIST */}
-                    {alt.drop_in_checklist && (
-                      <div className="px-4 pt-3 pb-2">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                          Drop-In Checklist
-                        </p>
-                        <div className="grid grid-cols-5 gap-2">
-                        {[
-                          {
-                            label: 'Package Match',
-                            pass: alt.drop_in_checklist.package_match,
-                            detail: alt.drop_in_checklist.package_match
-                              ? alt.drop_in_checklist.target_package
-                              : (alt.drop_in_checklist.target_package || '') + ' ≠ ' + (alt.drop_in_checklist.candidate_package || '')
-                          },
-                          {
-                            label: 'Mounting Type',
-                            pass: alt.drop_in_checklist.mounting_match,
-                            detail: alt.drop_in_checklist.mounting_match ? 'Same' : 'Different'
-                          },
-                          {
-                            label: 'Pin Count',
-                            pass: alt.drop_in_checklist.pin_count_match === true,
-                            detail:
-                              alt.drop_in_checklist.pin_count_match == null
-                                ? 'Unknown'
-                                : alt.drop_in_checklist.pin_count_match
-                                  ? `${alt.drop_in_checklist.target_pins} pins`
-                                  : `${alt.drop_in_checklist.target_pins ?? '?'} ≠ ${alt.drop_in_checklist.candidate_pins ?? '?'}`
-                          },
-                          {
-                            label: 'Required Specs',
-                            pass: alt.drop_in_checklist.required_specs_pass,
-                            detail: alt.drop_in_checklist.required_specs_pass ? 'All pass' : 'Some fail'
-                          }
-                        ].map(({ label, pass: ok, detail }) => (
-                          <div key={label} className="flex items-start gap-2 p-2 rounded"
-                              style={{ backgroundColor: ok ? '#F0FDF4' : '#FEF2F2' }}>
-                            {ok
-                              ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
-                              : <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#DC2626' }} />}
-                            <div>
-                              <p className="text-[11px] font-medium text-slate-700">{label}</p>
-                              <p className="text-[10px] text-slate-500">{detail}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                        <div className="mt-2 px-3 py-2 rounded text-xs"
-                             style={{
-                               backgroundColor: alt.is_drop_in ? '#F0FDF4' : '#FFFBEB',
-                               color: alt.is_drop_in ? '#16A34A' : '#CA8A04',
-                               border: '1px solid ' + (alt.is_drop_in ? '#BBF7D0' : '#FDE68A'),
-                             }}>
-                          {alt.is_drop_in
-                            ? '\u2713 Drop-in replacement \u2014 same package, same mounting, all required specs match.'
-                            : '\u26A0 Not a direct drop-in \u2014 verify package, pinout, and footprint before substitution.'}
-                        </div>
-                      </div>
-                  )}
+                    <div className="px-4 pt-3 pb-2">
+                      {alt.drop_in_checklist && <DropInChecklist checklist={alt.drop_in_checklist} isDropIn={alt.is_drop_in} />}
+                    </div>
 <div className="border-t px-4 pb-4 pt-2 flex gap-6" style={{ borderColor: T.border }}>
                     <div className="flex-1">
                       <table className="w-full text-xs"><thead><tr className="text-slate-400">
