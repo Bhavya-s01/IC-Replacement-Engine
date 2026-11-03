@@ -14,10 +14,9 @@ import sqlite3
 import sys
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict
 import json
 
-#from rich.pretty import data
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,7 +24,7 @@ from spec_parser import (
     parse_value, parse_range, parse_temperature_range,
     values_compatible, range_covers, candidate_meets_or_exceeds,
 )
-from match_rules import get_rules, SpecRule, CategoryRules
+from match_rules import get_rules
 from config import DB_PATH
 
 log = logging.getLogger(__name__)
@@ -324,11 +323,6 @@ class AlternativeFinder:
         ts, tm = self._score_temperature(target.specs, cand_specs, rules)
         total_score += ts; max_score += tm
 
-        # Lifecycle (active = bonus)
-        # Lifecycle scoring disabled in this technical-only mode.
-        ls = 0
-        lm = 0
-
         # Final
         result.total_score = total_score
         result.max_possible_score = max_score
@@ -371,14 +365,6 @@ class AlternativeFinder:
                 "status": "MATCH" if pin_count_match else "FAIL",
                 "required": True,
             }
-
-        # ── PACKAGE MATCH ──
-        pkg_exact = (target.package or "").lower() == (result.package or "").lower()
-
-        # ── MOUNTING MATCH ──
-        mount_exact = True
-        if target.mounting_type and result.mounting_type:
-            mount_exact = target.mounting_type.lower() == result.mounting_type.lower()
 
         # ── ALL REQUIRED SPECS PASS ──
         all_req_pass = all(
@@ -585,51 +571,6 @@ class AlternativeFinder:
             }
 
         return compare_pinouts(pin1, pin2)
-
-        def _get_pinout(part):
-            row = conn.execute(
-                "SELECT spec_value FROM specifications WHERE component_id = ? AND spec_name = '_pinout_json'",
-                (part.component_id,)
-            ).fetchone()
-            pin = PinoutInfo(mpn=part.mpn, package=part.package)
-
-            if row and row[0]:
-
-                data = json.loads(row[0])
-
-                pin.confidence = data.get("confidence", 0)
-                pin.source = data.get("source", "unknown")
-                pin.expected_pins = data.get("expected_pins")
-
-                for pn, pd in data.get("pins", {}).items():
-                    pin.add_pin(
-                        int(pn),
-                        pd["name"],
-                        pd.get("description", "")
-                    )
-
-            elif part.datasheet_url:
-
-                _, pin = parser.parse_datasheet(
-                    part.datasheet_url,
-                    part.mpn,
-                    part.package,
-                    part.category
-                )
-
-                if pin.total_pins > 0:
-
-                    conn.execute(
-                        "INSERT OR REPLACE INTO specifications "
-                        "(component_id, spec_name, spec_value) "
-                        "VALUES (?, ?, ?)",
-                        (part.component_id, "_pinout_json", pin.to_json())
-                    )
-
-                    conn.commit()
-            return pin
-
-        return compare_pinouts(_get_pinout(part1), _get_pinout(part2))
 
     def _pin_count_from_package(self, package_str):
         if not package_str:

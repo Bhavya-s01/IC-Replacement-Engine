@@ -17,7 +17,7 @@ DB_PATH = Path("ic_database.db")
 AUDIT_PATH = Path("exports/datasheet_audit.csv")
 BAD_STATUSES = {
     "invalid_pdf", "not_pdf_or_html",
-    "html_empty", "wrong_compliance_document", "wrong_mpn_document",
+    "html_empty", "html_wrapper", "wrong_compliance_document", "wrong_mpn_document",
     "no_readable_text", "suspicious_no_electrical_content",
 }
 
@@ -90,9 +90,10 @@ def main(apply=False, audit_path=AUDIT_PATH):
     conn.close()
     shutil.copy2(DB_PATH, backup)
     conn = sqlite3.connect(DB_PATH)
-    for component_id, _, _, _ in rows:
+    for component_id, mpn, _, _ in rows:
         conn.execute("UPDATE components SET datasheet_url='' WHERE id=?", (component_id,))
         reset_parser_specs(conn, component_id)
+        conn.execute("UPDATE datasheet_queue SET status='pending' WHERE mpn=? AND status != 'pending'", (mpn,))
     conn.commit()
     conn.close()
     print("Cleared {} bad URLs. Backup: {}".format(len(rows), backup))

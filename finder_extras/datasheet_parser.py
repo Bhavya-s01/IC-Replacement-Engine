@@ -12,7 +12,6 @@ import os
 import re
 import json
 import logging
-from typing import Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
@@ -23,209 +22,10 @@ except ImportError:
     PYMUPDF_OK = False
 
 try:
-    import requests
     REQUESTS_OK = True
 except ImportError:
     REQUESTS_OK = False
 
-
-# ═══════════════════════════════════════════════════════
-# PATTERNS TUNED TO REAL PDF TEXT [2]
-#
-# Key insight: PyMuPDF text from tables looks like:
-#   "Dropout Voltage(11)  IOUT = 300mA    160    mV"
-#   "PSRR\n(dB)\nFREQUENCY" (chart label)
-#   "quiescent current: 38µA"
-#   "Line Regulation  VIN = VOUT +1V to 5.5V  0.02  0.3  %/V"
-#
-# Patterns use looser matching with .*? bridges and
-# multiple unit alternatives.
-# ═══════════════════════════════════════════════════════
-
-UNIVERSAL_PATTERNS = {
-    "Thermal Resistance JA": [
-        r"(?:theta|R|θ)\s*J\s*A\s*[\s:=]+(\d+\.?\d*)\s*(?:°?C/W|K/W)",
-        r"(?:thermal\s+resistance).*?JA.*?(\d+\.?\d*)\s*(?:°?C/W|K/W)",
-    ],
-    "ESD Rating HBM": [
-        r"(?:ESD|HBM).*?(\d+\.?\d*)\s*kV",
-    ],
-}
-
-CATEGORY_PATTERNS = {
-    "ldo_ic": {
-        "PSRR": [
-            # "PSRR ... 60 ... dB" (table row)
-            r"PSRR.*?(\d+)\s*dB",
-            # "60dB (1kHz)" or "60 dB"
-            r"(\d+)\s*dB.*?(?:1\s*kHz|PSRR)",
-            # "power supply rejection ratio ... 60"
-            r"power\s+supply\s+rejection.*?(\d+)\s*dB",
-            # In electrical characteristics table: "PSRR ... COUT = 1µF ... 60 ... dB"
-            r"PSRR.*?(?:COUT|CIN|1µF|1uF).*?(\d+)\s+dB",
-        ],
-        "Dropout Voltage": [
-            # "dropout voltage (160mV at 300mA)" - from description text
-            r"dropout\s+voltage\s*\(?(\d+\.?\d*)\s*mV",
-            # "low dropout voltage (160mV" 
-            r"low\s+dropout.*?(\d+\.?\d*)\s*mV",
-            # Table: "Dropout Voltage(11)  IOUT = 300mA  160  mV"
-            r"[Dd]ropout\s+[Vv]oltage.*?(\d+)\s+mV",
-            # "VDROPOUT ... 160 ... mV"
-            r"V\s*DROPOUT.*?(\d+\.?\d*)\s*mV",
-        ],
-        "Quiescent Current": [
-            # "quiescent current: 38µA"
-            r"quiescent\s+current\s*[:=]\s*(\d+\.?\d*)\s*[µu]A",
-            # "Low quiescent current: 38µA"
-            r"[Ll]ow\s+quiescent.*?(\d+\.?\d*)\s*[µu]A",
-            # "ground current (typically 38µA)"
-            r"ground\s+current\s*\(?(?:typically\s+)?(\d+\.?\d*)\s*[µu]A",
-            # Table: "Quiescent Current ... 38 ... µA" or "Iq ... 38 ... µA"
-            r"(?:Quiescent|Iq|IQ|I\s*Q).*?(\d+\.?\d*)\s*[µu]A",
-            # "supply current ... 38 ... µA"
-            r"supply\s+current.*?(\d+\.?\d*)\s*[µu]A",
-        ],
-        "Output Noise": [
-            r"[Oo]utput\s+[Vv]oltage\s+[Nn]oise.*?(\d+\.?\d*)\s*[µu]V",
-            r"[Oo]utput\s+[Nn]oise.*?(\d+\.?\d*)\s*[µu]V",
-            r"noise.*?(\d+\.?\d*)\s*[µu]Vrms",
-        ],
-        "Load Regulation": [
-            # "Load Regulation(10)  IOUT = 100µA to 300mA  8  40  mV"
-            r"[Ll]oad\s+[Rr]egulation.*?(\d+\.?\d*)\s+(\d+\.?\d*)\s+mV",
-            r"[Ll]oad\s+[Rr]egulation.*?(\d+\.?\d*)\s*mV",
-            r"[Ll]oad\s+[Rr]egulation.*?(\d+\.?\d*)\s*%",
-        ],
-        "Line Regulation": [
-            # "Line Regulation  VIN = VOUT +1V to 5.5V  0.02  0.3  %/V"
-            r"[Ll]ine\s+[Rr]egulation.*?(\d+\.?\d*)\s+(\d+\.?\d*)\s*%",
-            r"[Ll]ine\s+[Rr]egulation.*?(\d+\.?\d*)\s*%",
-            r"[Ll]ine\s+[Rr]egulation.*?(\d+\.?\d*)\s*mV",
-        ],
-        "Enable Threshold": [
-            r"[Ee]nable.*?[Tt]hreshold.*?(\d+\.?\d*)\s*V",
-            r"EN\s+[Hh]igh.*?(\d+\.?\d*)\s*V",
-            r"[Ee]nable\s+[Vv]oltage.*?(\d+\.?\d*)\s*V",
-        ],
-        "Current Limit": [
-            r"[Cc]urrent\s+[Ll]imit.*?(\d+)\s*mA",
-            r"[Ss]hort\s+[Cc]ircuit.*?(\d+)\s*mA",
-        ],
-        "Soft Start Time": [
-            r"[Ss]oft[- ]?[Ss]tart.*?(\d+\.?\d*)\s*(?:ms|µs|us)",
-        ],
-    },
-
-    "dcdc_converter": {
-        "Efficiency Peak": [
-            r"[Ee]fficiency.*?(\d+\.?\d*)\s*%",
-            r"(\d+\.?\d*)\s*%\s*[Ee]fficiency",
-        ],
-        "Output Ripple": [
-            r"[Oo]utput\s+[Rr]ipple.*?(\d+\.?\d*)\s*mV",
-            r"[Rr]ipple.*?(\d+\.?\d*)\s*mV\s*(?:p-p|pp|peak)",
-        ],
-        "Switching Frequency": [
-            r"[Ss]witching\s+[Ff]requency.*?(\d+\.?\d*)\s*(?:kHz|MHz)",
-            r"f\s*SW.*?(\d+\.?\d*)\s*(?:kHz|MHz)",
-        ],
-        "Enable Threshold": [
-            r"[Ee]nable.*?[Tt]hreshold.*?(\d+\.?\d*)\s*V",
-        ],
-        "Soft Start Time": [
-            r"[Ss]oft[- ]?[Ss]tart.*?(\d+\.?\d*)\s*(?:ms|µs)",
-        ],
-        "Duty Cycle Max": [
-            r"[Dd]uty\s+[Cc]ycle.*?(\d+\.?\d*)\s*%",
-        ],
-    },
-
-    "audio_ic": {
-        "THD+N": [
-            r"THD\+?N.*?(\d+\.?\d*)\s*%",
-            r"[Dd]istortion.*?(\d+\.?\d*)\s*%",
-        ],
-        "SNR": [
-            r"(?:SNR|S/N).*?(\d+\.?\d*)\s*dB",
-            r"[Ss]ignal.to.[Nn]oise.*?(\d+\.?\d*)\s*dB",
-        ],
-        "PSRR": [
-            r"PSRR.*?(\d+\.?\d*)\s*dB",
-        ],
-        "Power Down Current": [
-            r"(?:[Pp]ower[- ]?[Dd]own|[Ss]hutdown|[Ss]tandby)\s+[Cc]urrent.*?(\d+\.?\d*)\s*(?:[µu]A|mA|nA)",
-        ],
-    },
-
-    "usb_ic": {
-        "ESD Rating": [
-            r"ESD.*?(\d+\.?\d*)\s*kV",
-        ],
-        "VBUS Detection": [
-            r"VBUS\s+(?:[Dd]etect|[Tt]hreshold).*?(\d+\.?\d*)\s*V",
-        ],
-    },
-
-    "clock_timing": {
-        "Jitter RMS": [
-            r"[Jj]itter.*?(?:rms|RMS).*?(\d+\.?\d*)\s*(?:ps|ns)",
-            r"(?:rms|RMS)\s+[Jj]itter.*?(\d+\.?\d*)\s*(?:ps|ns)",
-        ],
-        "Phase Noise": [
-            r"[Pp]hase\s+[Nn]oise.*?[-]?(\d+\.?\d*)\s*dBc",
-        ],
-    },
-
-    "retimer_ic": {
-        "Output Jitter": [
-            r"[Oo]utput\s+[Jj]itter.*?(\d+\.?\d*)\s*(?:ps|ns)",
-        ],
-        "Return Loss": [
-            r"[Rr]eturn\s+[Ll]oss.*?[-]?(\d+\.?\d*)\s*dB",
-        ],
-    },
-
-    "protection_ic": {
-        "Response Time": [
-            r"[Rr]esponse\s+[Tt]ime.*?(\d+\.?\d*)\s*(?:ns|ps)",
-        ],
-    },
-
-    "flash_memory": {
-        "Page Program Time": [
-            r"[Pp]age\s+[Pp]rogram.*?(\d+\.?\d*)\s*(?:ms|[µu]s)",
-        ],
-        "Standby Current": [
-            r"[Ss]tandby\s+[Cc]urrent.*?(\d+\.?\d*)\s*(?:[µu]A|mA)",
-        ],
-    },
-
-    "mcu_soc": {
-        "Sleep Current": [
-            r"(?:[Ss]leep|[Ss]top|[Ss]tandby)\s+(?:[Mm]ode\s+)?[Cc]urrent.*?(\d+\.?\d*)\s*(?:[µu]A|nA|mA)",
-        ],
-        "Wake Up Time": [
-            r"[Ww]ake[- ]?[Uu]p\s+[Tt]ime.*?(\d+\.?\d*)\s*(?:[µu]s|ms)",
-        ],
-    },
-}
-
-# Copy patterns to related categories
-for base, extras in [
-    ("ldo_ic", ["power_sequencer", "battery_management"]),
-    ("flash_memory", ["eeprom", "fram_mram_sram"]),
-    ("clock_timing", ["logic_mux"]),
-]:
-    if base in CATEGORY_PATTERNS:
-        for extra in extras:
-            if extra not in CATEGORY_PATTERNS:
-                CATEGORY_PATTERNS[extra] = CATEGORY_PATTERNS[base].copy()
-
-
-# ═══════════════════════════════════════════════════════
-# PIN HANDLING
-# ═══════════════════════════════════════════════════════
 
 def _max_pins_from_package(package_str):
     if not package_str:
@@ -366,23 +166,15 @@ class DatasheetParser:
         os.makedirs(download_dir, exist_ok=True)
 
     def download(self, url, mpn):
-        if not url or not REQUESTS_OK:
+        if not url:
             return None
-        safe = re.sub(r"[^\w\-.]", "_", mpn) + ".pdf"
-        path = os.path.join(self.download_dir, safe)
-        if os.path.exists(path):
-            return path
         try:
-            resp = requests.get(url, timeout=30, verify=False,
-                                headers={"User-Agent": "Mozilla/5.0"})
-            if resp.status_code == 200 and ("pdf" in resp.headers.get("content-type", "") or url.endswith(".pdf")):
-                with open(path, "wb") as f:
-                    f.write(resp.content)
-                log.info("Downloaded %s (%d KB)", mpn, len(resp.content) // 1024)
-                return path
+            from finder_extras.llm_parser import download_pdf
+            path, file_type = download_pdf(url, mpn, download_dir=self.download_dir)
+            return path if file_type == "pdf" else None
         except Exception as exc:
-            log.debug("Download failed %s: %s", mpn, exc)
-        return None
+            log.debug("Download/validation failed %s: %s", mpn, exc)
+            return None
 
     def _get_page_texts(self, pdf_path, max_pages=10):
         if not PYMUPDF_OK:
@@ -396,34 +188,9 @@ class DatasheetParser:
             return []
 
     def extract_specs(self, page_texts, category=""):
-        """Extract specs using multi-pattern matching per spec name."""
-        text = "\n".join(page_texts)
-        specs = {}
-
-        # Universal patterns
-        for name, patterns in UNIVERSAL_PATTERNS.items():
-            for pat in patterns:
-                m = re.search(pat, text, re.IGNORECASE | re.DOTALL)
-                if m:
-                    specs[name] = m.group(1).strip()
-                    break
-
-        # Category-specific patterns
-        cat_pats = CATEGORY_PATTERNS.get(category, {})
-        for name, patterns in cat_pats.items():
-            if name in specs:
-                continue
-            for pat in patterns:
-                m = re.search(pat, text, re.IGNORECASE | re.DOTALL)
-                if m:
-                    val = m.group(1).strip()
-                    # If pattern captured two groups (min/max), take max
-                    if m.lastindex and m.lastindex >= 2:
-                        val = m.group(2).strip()
-                    specs[name] = val
-                    break
-
-        return specs
+        """Unit-aware extraction; see finder_extras/spec_extractor.py."""
+        from finder_extras.spec_extractor import extract_specs
+        return extract_specs(page_texts, category)
 
     def _find_pin_pages(self, page_texts):
         pages = []
@@ -540,21 +307,3 @@ class DatasheetParser:
         conn.commit()
         log.info("Enriched %s: %d specs, %d pins (valid=%s)", mpn, len(specs), pinout.total_pins, pinout.is_valid())
         return specs, pinout
-
-    def batch_enrich(self, db, category=None, limit=50):
-        conn = db._get_conn()
-        q = "SELECT id FROM components WHERE datasheet_url != '' AND datasheet_url IS NOT NULL"
-        params = []
-        if category:
-            q += " AND category = ?"
-            params.append(category)
-        q += " LIMIT ?"
-        params.append(limit)
-        parts = conn.execute(q, params).fetchall()
-        enriched = 0
-        for part in parts:
-            specs, pinout = self.enrich_component(db, part[0])
-            if specs or pinout.total_pins > 0:
-                enriched += 1
-        log.info("Enriched %d / %d", enriched, len(parts))
-        return enriched

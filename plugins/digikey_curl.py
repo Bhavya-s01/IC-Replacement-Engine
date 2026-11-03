@@ -6,7 +6,6 @@ import re
 import time
 import sys
 import os
-from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -87,9 +86,19 @@ class DigiKeyCurlPlugin(PluginBase):
                 if a:
                     href = a["href"]
                     if "datasheet" in href.lower():
-                        raw["_datasheet_url"] = href if href.startswith("http") else DIGIKEY_BASE + href
+                        if href.startswith("//"):
+                            raw["_datasheet_url"] = "https:" + href
+                        elif href.startswith("/"):
+                            raw["_datasheet_url"] = DIGIKEY_BASE + href
+                        else:
+                            raw["_datasheet_url"] = href
                     elif "/en/products/detail/" in href:
-                        raw["_product_url"] = href if href.startswith("http") else DIGIKEY_BASE + href
+                        if href.startswith("//"):
+                            raw["_product_url"] = "https:" + href
+                        elif href.startswith("/"):
+                            raw["_product_url"] = DIGIKEY_BASE + href
+                        else:
+                            raw["_product_url"] = href
 
             comp = self._raw_to_component(raw, category_slug, subcategory)
             if comp:

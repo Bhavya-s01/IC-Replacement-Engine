@@ -6,14 +6,11 @@ import logging
 import time
 import sys
 import os
-from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CATEGORIES, all_category_slugs
 from database import Database
-from models import Component
-from plugins.base import PluginBase
 
 log = logging.getLogger(__name__)
 

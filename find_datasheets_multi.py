@@ -13,7 +13,7 @@ import time
 import logging
 import argparse
 
-from utils.datasheet_download import download_validated_datasheet
+from utils.datasheet_download import download_and_validate_datasheet
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s")
@@ -38,10 +38,11 @@ def validated_candidate(result, mpn):
     """
     if not result or not result.get("datasheet_url"):
         return None, None
-    pdf_path = download_validated_datasheet(result["datasheet_url"], mpn)
-    if not pdf_path:
+    pdf_path, direct_url = download_and_validate_datasheet(result["datasheet_url"], mpn)
+    if not pdf_path or not direct_url:
         log.info("  Rejected unverified candidate for %s from %s", mpn, result.get("source"))
         return None, None
+    result["datasheet_url"] = direct_url
     return result, pdf_path
 
 
@@ -221,16 +222,16 @@ def repair_component(mpn):
             result = search_fn(page, mpn)
             if not result or not result.get("datasheet_url"):
                 continue
-            pdf_path = download_validated_datasheet(result["datasheet_url"], mpn)
-            if pdf_path and _is_valid_datasheet(pdf_path, mpn):
+            cand, pdf_path = validated_candidate(result, mpn)
+            if cand and pdf_path:
                 conn.execute(
                     "UPDATE components SET datasheet_url = ? WHERE id = ?",
-                    (result["datasheet_url"], component["id"]),
+                    (cand["datasheet_url"], component["id"]),
                 )
                 conn.commit()
                 browser.close()
                 conn.close()
-                log.info("Repaired %s using %s: %s", mpn, source_name, result["datasheet_url"])
+                log.info("Repaired %s using %s: %s", mpn, source_name, cand["datasheet_url"])
                 return True
         browser.close()
 
@@ -305,7 +306,7 @@ def process_not_found(limit=30, enrich=True):
     # Get parts that DigiKey couldn't find
     pending = conn.execute("""
         SELECT * FROM datasheet_queue
-        WHERE status IN ('not_found', 'pending')
+        WHERE status IN ('not_found', 'pending') AND source <> 'component_missing_url'
         LIMIT ?
     """, (limit,)).fetchall()
 

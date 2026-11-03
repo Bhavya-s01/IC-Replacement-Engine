@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import sys
 import os
-import json
 import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,8 +26,6 @@ from database import Database
 from engine import IngestionEngine
 
 try:
-    from rich.console import Console
-    from rich.table import Table as RichTable
     from rich.logging import RichHandler
     RICH = True
 except ImportError:

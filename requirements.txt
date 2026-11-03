@@ -1,34 +1,24 @@
-# ═══════════════════════════════════════════
-# IC Alternative Finder — Python Dependencies
-# Install: python -m pip install -r requirements.txt
-# ═══════════════════════════════════════════
+# Install: python -m pip install -r requirements.txt && python -m playwright install msedge
 
-# ── Scraper (DigiKey) ──
-playwright>=1.40.0
-
-# ── API Backend ──
+# API
 fastapi>=0.100.0
 uvicorn>=0.20.0
 pydantic>=2.0.0
+python-multipart>=0.0.9     # admin file uploads
 
-# ─ Datasheet Parser ──
-pymupdf>=1.23.0
+# Scraping and datasheet search
+playwright>=1.40.0
 requests>=2.28.0
-beautifulsoup4>=4.12.0
-
-# ── LLM Parsing (NVIDIA NIM) ──
-openai>=1.0.0           # NVIDIA NIM uses OpenAI-compatible API
-httpx>=0.25.0           # For SSL bypass in corporate networks
-
-# ── Data Export & Processing ──
-pandas>=2.0.0
-numpy>=1.23.0
-
-# ── Scraper Fallback (optional) ──
-curl-cffi>=0.6.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
-# ── CLI Formatting (optional) ──
+# Datasheet parsing and LLM extraction
+pymupdf>=1.23.0
+openai>=1.0.0               # OpenAI-compatible client (Gemini / NVIDIA)
+
+# Excel templates and MPN uploads
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Optional console formatting
 rich>=13.0.0
-click>=8.1.0

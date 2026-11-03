@@ -1,7 +1,7 @@
 """Data models for scraped IC components."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 from datetime import datetime
 import json
 

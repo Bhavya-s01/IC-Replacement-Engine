@@ -1,76 +1,70 @@
 # Deployment Guide
 
-## Runtime components
+## What it is
 
-| Area | Entry point | Responsibility |
-|---|---|---|
-| Ingestion | `main.py` | Scrape DigiKey categories into SQLite. |
-| Matching | `finder_cli.py`, `finder.py` | Find and compare electrical alternatives. |
-| API | `api.py` | Expose search, lookup, comparison, and dashboard endpoints. |
-| Datasheets | `fetch_datasheets.py`, `find_datasheets_multi.py` | Find candidate URLs, download PDFs, and save only validated documents. |
-| Enrichment | `finder_extras/llm_parser.py` | Extract recognised datasheet fields through NVIDIA NIM with regex fallback. |
-| Maintenance | `audit_datasheets.py`, `repair_database.py`, `populate_datasheet_queue.py` | Audit saved URLs, safely clear confirmed bad ones, and replenish the fetch queue. |
+A FastAPI service plus a SQLite database (`ic_database.db`, ~120 MB) that recommends replacement ICs.
+Lookups read only the database; **no LLM call is made when a user searches**. The LLM is used only by
+admin jobs that add or enrich parts.
 
-## Required setup
+## Requirements
+
+- Python 3.11+ (tested on 3.14), Windows or Linux
+- Microsoft Edge for Playwright (`python -m playwright install msedge`), needed only for scraping and datasheet search
+- An OpenAI-compatible LLM key (Gemini free tier works), needed only for enrichment
+- ~500 MB disk (database, optional `datasheets/` PDF cache)
+
+## Setup
 
 ```bash
-python -m pip install -r requirements.txt
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt     # Linux: .venv/bin/python
 python -m playwright install msedge
-copy .env.example .env
+cp .env.example .env        # fill LLM_API_KEY; set ADMIN_TOKEN for remote admin access
 ```
 
-Set `NVIDIA_API_KEY` in `.env` only when LLM enrichment is required. Scraping,
-matching, audits, and no-enrichment fetch batches do not require that key.
+`database.py` creates every table on first start, so an empty database also boots.
 
-## Supported operating flows
-
-### Ingest catalogue data
+## Run
 
 ```bash
-python main.py scrape --category ldo_ic --max-pages 2
-python main.py status
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-### Find alternatives
+Docs and try-it UI: `http://<host>:8000/docs`.
 
-```bash
-python finder_cli.py lookup MIC5501-3.0YM5-TR
-python finder_cli.py find MIC5501-3.0YM5-TR --same-package
-```
+| Area | Endpoints |
+|---|---|
+| Lookup | `GET /api/search`, `/api/lookup/{mpn}`, `/api/compare`, `/api/browse`, `/api/categories` |
+| Alternatives | `GET /api/alternatives/{mpn}` (parts without a datasheet return only the Excel replacement and a "Datasheet not found" status), `/api/alternatives-full/{mpn}` |
+| Supply chain | `GET /api/supply-chain/{mpn}`, `/api/supply-chain-stats` |
+| Admin | `/api/admin/*`, see below |
 
-### Maintain datasheet URLs
+## Admin portal (`/api/admin`)
 
-```bash
-# Refill the queue without replacing its existing statuses.
-python populate_datasheet_queue.py
+Allowed from localhost, or from anywhere with header `x-admin-token: $ADMIN_TOKEN`.
+Jobs run as background processes (one at a time), with logs under `admin_logs/`.
 
-# One resumable audit; its checkpoint is exports/datasheet_audit.csv.
-python audit_datasheets.py --workers 8
+| Task | Use |
+|---|---|
+| `add_mpns` | New MPNs: find datasheet, extract specs, update cache. They are searchable afterwards. |
+| `scrape` | Pull more ICs from DigiKey for chosen categories. |
+| `retry_datasheets` / `fetch_datasheets` | Look for missing datasheets (LCSC, Alldatasheet, Datasheet4U). |
+| `enrich_local` / `enrich_description` | LLM spec extraction from datasheet URLs / Excel descriptions. |
+| `reclassify`, `db_status`, `enrich_stats` | Maintenance and reports. |
+| `POST /upload/supply-chain`, `/upload/mpns` | Import an ODM Excel template; queue MPNs. |
 
-# Inspect the repair set, then clear only conclusively bad URLs.
-python repair_database.py
-python repair_database.py --apply
+Equivalent CLI: `python add_mpns.py -c ldo_ic MPN1 MPN2`, `python main.py scrape -c ldo_ic -m 5`.
 
-# Run small batches. These save a URL only after PDF and MPN validation.
-python fetch_datasheets.py --limit 5 --no-enrich
-python find_datasheets_multi.py --limit 5 --no-enrich
-```
+## Data
 
-`request_error` and HTTP 403 audit results are retained for later retry; they
-are not treated as proof that a vendor URL is bad. HTTP 404/410 and documents
-proven to be invalid, unrelated, or compliance-only are repair candidates.
+- `ic_database.db`: components (DigiKey candidates plus supply-chain parts), specs, `supply_chain`, `specs_cache`, `datasheet_queue`. Back it up before bulk jobs; `*.bak` files are not needed in production.
+- `python clean_specs.py --apply` and `python build_specs_cache.py` rebuild derived data (the cache is what the finder reads).
+- Datasheets are streamed from their URL; only validated URLs are stored.
 
-## Data locations
+## Operating notes
 
-- `ic_database.db`: production SQLite data; back it up before bulk operations.
-- `datasheets/`: PDFs validated by the fetch workflows.
-- `downloads/datasheets/`: parser-managed cached downloads.
-- `exports/datasheet_audit.csv`: resumable URL-audit checkpoint and report.
-
-## What is intentionally not automatic
-
-- The audit never modifies the database.
-- `repair_database.py` has a dry-run default and creates a backup when applied.
-- LLM enrichment is optional and requires both a key and readable document text.
-- A compatibility score is an engineering aid, not a replacement for pinout,
-  lifecycle, qualification, or supply-chain review.
+- Run behind a reverse proxy with TLS; restrict CORS in `api.py` (currently `*`) to your frontend origin.
+- Set `ADMIN_TOKEN` in any shared environment; without it admin endpoints answer 403 to non-local clients.
+- Gemini free tier is rate-limited; 503/429 responses fall back to regex extraction for that part.
+- A compatibility score is an engineering aid, not a replacement for pinout, lifecycle, qualification or supply-chain review.
+- Tests: `python -m unittest test_datasheet_pipeline`.

@@ -4,7 +4,6 @@ Handles: "3.3V", "100mA", "-40°C ~ 125°C", "500kHz", "60dB", etc.
 """
 
 import re
-from typing import Optional, Tuple
 
 MULTIPLIERS = {
     "p": 1e-12, "n": 1e-9, "u": 1e-6, "\u00b5": 1e-6, "\u03bc": 1e-6,

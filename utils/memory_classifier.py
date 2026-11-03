@@ -33,39 +33,3 @@ def classify_memory_part(component):
 
     return "flash_memory"
 
-
-def reclassify_memory_components(db):
-    """Run after scraping /memory/774 to split parts into correct categories."""
-    conn = db._get_conn()
-    memory_slugs = ("eeprom", "flash_memory", "fram_mram_sram")
-    placeholders = ",".join("?" for _ in memory_slugs)
-    rows = conn.execute(
-        "SELECT id, description, category FROM components WHERE category IN ({})".format(placeholders),
-        memory_slugs
-    ).fetchall()
-
-    reclassified = 0
-    for row in rows:
-        comp_id = row["id"]
-        specs_rows = conn.execute(
-            "SELECT spec_name, spec_value FROM specifications WHERE component_id = ?",
-            (comp_id,)
-        ).fetchall()
-        specs = {r["spec_name"]: r["spec_value"] for r in specs_rows}
-
-        class FakeComp:
-            pass
-        fc = FakeComp()
-        fc.description = row["description"]
-        fc.raw_specs = specs
-
-        new_category = classify_memory_part(fc)
-        if new_category != row["category"]:
-            conn.execute(
-                "UPDATE components SET category = ? WHERE id = ?",
-                (new_category, comp_id)
-            )
-            reclassified += 1
-
-    conn.commit()
-    return reclassified

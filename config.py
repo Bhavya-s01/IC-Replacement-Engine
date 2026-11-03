@@ -1,7 +1,7 @@
 """config.py - Categories and settings for monitor IC scraping."""
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List
 import os
 
 DB_PATH = os.environ.get("IC_DB_PATH", "ic_database.db")

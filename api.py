@@ -7,18 +7,17 @@ Docs: http://localhost:8000/docs
 import sys
 import os
 import logging
-from typing import Optional, List, Dict
-import sqlite3
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from finder import AlternativeFinder
 from database import Database
 from config import CATEGORIES
+from admin_api import router as admin_router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("api")
@@ -37,6 +36,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin_router)
+
 finder = AlternativeFinder()
 db = Database()
 
@@ -54,12 +55,7 @@ def health():
 def get_dashboard():
     counts = finder.stats()
     total = finder.total_parts()
-    conn = db._get_conn()
-
     lifecycle = {}
-    rows = []  # lifecycle_status column removed from database
-    for r in rows:
-        lifecycle[""] = r["cnt"]
 
     return {
         "total": total,
@@ -122,6 +118,7 @@ def lookup_part(mpn: str):
        "datasheet_url": part.datasheet_url,
         "product_url": part.product_url,
         "specs": part.specs,
+        "datasheet_status": "found" if (part.datasheet_url or "").startswith(("http", "//")) else "not_found",
     }
 
 
@@ -135,6 +132,25 @@ def find_alternatives(
     target = finder.lookup(mpn)
     if not target:
         raise HTTPException(status_code=404, detail="Part not found: {}".format(mpn))
+
+    # Supply-chain part with no datasheet: skip spec matching, show the Excel replacement only
+    ds = (target.datasheet_url or "").strip()
+    conn = db._get_conn()
+    row = conn.execute("SELECT p2p_mpn, p2p_supplier, non_p2p_mpn, non_p2p_supplier FROM supply_chain "
+                     "WHERE upper(mpn)=upper(?) LIMIT 1", (target.mpn,)).fetchone()
+    if row is not None and not ds.startswith(("http", "//")):
+        out = []
+        for kind, m, sup in (("p2p", row["p2p_mpn"], row["p2p_supplier"]),
+                             ("non_p2p", row["non_p2p_mpn"], row["non_p2p_supplier"])):
+            if m and m.strip():
+                alt = finder.lookup(m.strip())
+                out.append({"mpn": m.strip(), "manufacturer": sup or (alt.manufacturer if alt else ""),
+                            "description": alt.description if alt else "", "category": target.category,
+                            "package": alt.package if alt else "", "datasheet_url": alt.datasheet_url if alt else None,
+                            "source": "supply_chain_excel", "solution_type": kind,
+                            "datasheet_status": "Datasheet not found for " + target.mpn,
+                            "compatibility_pct": None, "spec_scores": {}})
+        return out
 
     alts = finder.find_alternatives(
         target,
@@ -166,15 +182,10 @@ def find_alternatives(
                 entry["candidate"] = "n/a"
             filtered_scores[name] = entry
 
-        # # Check P2P match from supply chain table
-        # p2p_match = False
-        # p2p_mpn = None
-
         # P2P pin-to-pin comparison using cached LLM-extracted pinout data
         p2p_match = False
         p2p_score = 0.0
         p2p_details = {}
-        p2p_mpn = None
 
         try:
             p2p_score, p2p_details = finder.compare_pinouts(
@@ -188,7 +199,7 @@ def find_alternatives(
         # Also check supply chain P2P solution for TARGET part
         sc_p2p = None
         try:
-            sc_p2p_row = conn_sc.execute(
+            sc_p2p_row = conn.execute(
                 "SELECT p2p_mpn, p2p_supplier FROM supply_chain WHERE mpn = ? LIMIT 1",
                 (target.mpn,)
             ).fetchone()
@@ -211,7 +222,6 @@ def find_alternatives(
             ).fetchone()
             if sc_row and sc_row["p2p_mpn"]:
                 p2p_match = True
-                p2p_mpn = sc_row["p2p_mpn"]
         except Exception:
             pass
 
@@ -301,13 +311,7 @@ def browse_category(
 ):
     conn = db._get_conn()
 
-    valid_sorts = {
-        "mpn": "manufacturer_part_number",
-        "manufacturer": "manufacturer",
-    }
-
     sort_col = "manufacturer_part_number"
-    direction = "ASC"
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
     rows = conn.execute(
@@ -387,7 +391,7 @@ def get_stats():
 @app.get("/api/matching-rules")
 def get_matching_rules():
     """Return all category matching rules for the methodology page."""
-    from match_rules import RULES, get_rules
+    from match_rules import get_rules
     from config import CATEGORIES
 
     result = []
@@ -552,9 +556,6 @@ def find_alternatives_full(
     except Exception:
         pass
 
-    conn_sc = sqlite3.connect("ic_database.db")
-    conn_sc.row_factory = sqlite3.Row
-
     # Build results with supply chain enrichment
     results = []
     for a in alts:
@@ -606,40 +607,3 @@ def find_alternatives_full(
         "alternatives": results,
         "total_found": len(alts),
     }
-@app.get("/api/alternatives/{mpn:path}")
-def find_alternatives(
-    mpn: str,
-    top_n: int = Query(10, le=50),
-    min_compat: float = Query(30.0, ge=0, le=100),
-    same_package: bool = False,
-):
-    target = finder.lookup(mpn)
-    if not target:
-        raise HTTPException(status_code=404, detail="Part not found: {}".format(mpn))
-
-    alts = finder.find_alternatives(
-        target, top_n=top_n,
-        min_compatibility_pct=min_compat,
-        same_package_only=same_package,
-    )
-
-    return [
-        {
-            "mpn": a.mpn,
-            "manufacturer": a.manufacturer,
-            "description": a.description,
-            "category": a.category,
-            "package": a.package,
-            "mounting_type": a.mounting_type,
-            "datasheet_url": a.datasheet_url,
-            "product_url": a.product_url,
-            "compatibility_pct": a.compatibility_pct,
-            "total_score": a.total_score,
-            "max_possible_score": a.max_possible_score,
-            "is_drop_in": a.is_drop_in,
-            "spec_scores": a.spec_scores,
-            "drop_in_checklist": getattr(a, 'drop_in_checklist', {}),
-            "notes": getattr(a, 'notes', ''),
-        }
-        for a in alts
-    ]

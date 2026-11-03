@@ -6,7 +6,7 @@ Datasheet enrichment happens automatically on every find.
 
 import argparse, logging, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from finder import AlternativeFinder, PartInfo, MatchResult
+from finder import AlternativeFinder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s")
 

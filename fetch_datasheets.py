@@ -12,7 +12,7 @@ import time
 import logging
 import argparse
 
-from utils.datasheet_download import download_validated_datasheet
+from utils.datasheet_download import download_and_validate_datasheet
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(message)s")
@@ -25,6 +25,19 @@ try:
 except ImportError:
     PW_OK = False
     log.error("Playwright not installed. Run: pip install playwright && python -m playwright install msedge")
+
+
+def _clean_url(url):
+    if not url:
+        return None
+    url = url.strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("https://www.digikey.com//"):
+        return "https://" + url[len("https://www.digikey.com//"):]
+    if url.startswith("/"):
+        return "https://www.digikey.com" + url
+    return url
 
 
 def search_digikey(page, mpn):
@@ -44,7 +57,9 @@ def search_digikey(page, mpn):
             link.wait_for(timeout=8000)
             href = link.get_attribute("href")
             if href:
-                if not href.startswith("http"):
+                if href.startswith("//"):
+                    href = "https:" + href
+                elif href.startswith("/"):
                     href = "https://www.digikey.com" + href
                 page.goto(href, timeout=30000, wait_until="domcontentloaded")
                 time.sleep(3)
@@ -69,25 +84,42 @@ def extract_from_page(page, mpn):
 
     content = page.content()
 
-    # Extract datasheet URL — look for PDF links
-    pdf_patterns = [
-        r'href="(https?://[^"]+\.pdf[^"]*)"',
-        r'"datasheetUrl"\s*:\s*"(https?://[^"]+)"',
-    ]
-    for pattern in pdf_patterns:
-        match = re.search(pattern, content, re.IGNORECASE)
-        if match:
-            url = match.group(1)
-            # Skip DigiKey's own PDFs (drawings, not datasheets)
-            if "digikey" not in url.lower():
+    # 1. Primary: JSON-LD datasheetUrl
+    ds_match = re.search(r'"datasheetUrl"\s*:\s*"((?:https?:)?//[^"]+)"', content)
+    if ds_match:
+        cand = _clean_url(ds_match.group(1))
+        if cand and not any(skip in cand.lower() for skip in ["drawing", "footprint", "cad", "rohs"]):
+            result["datasheet_url"] = cand
+
+    # 2. Try datasheet download element on page
+    if not result["datasheet_url"]:
+        try:
+            ds_el = page.locator('a[data-testid="datasheet-download"], a[href*="datasheet"], a:has-text("Download Datasheet")').first
+            if ds_el.count() > 0:
+                href = ds_el.get_attribute("href")
+                if href:
+                    cand = _clean_url(href)
+                    if cand and not any(skip in cand.lower() for skip in ["drawing", "footprint", "cad", "rohs"]):
+                        result["datasheet_url"] = cand
+        except Exception:
+            pass
+
+    # 3. Search for any valid PDF link, prioritizing non-drawings
+    if not result["datasheet_url"]:
+        pdf_patterns = [
+            r'href="((?:https?:)?//[^"]+\.pdf[^"]*)"',
+            r'href="(/[^"]+\.pdf[^"]*)"',
+        ]
+        for pattern in pdf_patterns:
+            for match in re.finditer(pattern, content, re.IGNORECASE):
+                url = _clean_url(match.group(1))
+                lower = url.lower()
+                if any(skip in lower for skip in ["drawing", "footprint", "cad", "rohs", "terms", "privacy", "cookie"]):
+                    continue
                 result["datasheet_url"] = url
                 break
-
-    # If no external PDF found, try any PDF
-    if not result["datasheet_url"]:
-        match = re.search(r'href="(https?://[^"]+\.pdf[^"]*)"', content)
-        if match:
-            result["datasheet_url"] = match.group(1)
+            if result["datasheet_url"]:
+                break
 
     # Extract manufacturer
     try:
@@ -230,30 +262,32 @@ def run(limit=30, enrich=True):
             # Search DigiKey via Edge
             result = search_digikey(page, mpn)
 
-            pdf_path = (
-                download_validated_datasheet(result["datasheet_url"], mpn)
-                if result else None
-            )
-            if result and pdf_path:
+            validated_path = None
+            validated_url = None
+            if result and result.get("datasheet_url"):
+                validated_path, validated_url = download_and_validate_datasheet(
+                    result["datasheet_url"], mpn
+                )
+
+            if validated_path and validated_url:
                 if existing:
                     conn.execute(
                         "UPDATE components SET datasheet_url = ? WHERE id = ?",
-                        (result["datasheet_url"], existing["id"]),
+                        (validated_url, existing["id"]),
                     )
                     comp_id = existing["id"]
                 else:
                     conn.execute("""
                         INSERT OR IGNORE INTO components (
                             manufacturer_part_number, manufacturer, description,
-                            category, datasheet_url, source,
-                            package, lifecycle_status, stock, unit_price
-                        ) VALUES (?, ?, ?, ?, ?, 'template', ?, 'Unknown', 0, 0.0)
+                            category, datasheet_url, source, package
+                        ) VALUES (?, ?, ?, ?, ?, 'template', ?)
                     """, (
                         mpn,
                         result.get("manufacturer", ""),
                         result.get("description", ""),
                         category,
-                        result["datasheet_url"],
+                        validated_url,
                         result.get("package", package),
                     ))
                     comp = conn.execute(
@@ -265,10 +299,10 @@ def run(limit=30, enrich=True):
                 conn.execute("UPDATE datasheet_queue SET status = 'found' WHERE id = ?", (item["id"],))
                 conn.commit()
                 found += 1
-                log.info("  Validated URL: %s", result["datasheet_url"][:70])
+                log.info("  Validated URL: %s", validated_url[:70])
 
                 if enrich and comp_id:
-                    n = enrich_with_llm(conn, comp_id, mpn, pdf_path, package, category)
+                    n = enrich_with_llm(conn, comp_id, mpn, validated_path, package, category)
                     if n > 0:
                         enriched += 1
                         log.info("  Extracted %d specs", n)
@@ -278,7 +312,7 @@ def run(limit=30, enrich=True):
                     (item["id"],)
                 )
                 conn.commit()
-                log.info("  Not found on DigiKey")
+                log.info("  Not found or invalid datasheet for %s", mpn)
 
             time.sleep(2.5)  # rate limit
 

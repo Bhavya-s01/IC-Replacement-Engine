@@ -90,6 +90,9 @@ def _canonical_spec_name(name: str, category: str) -> Optional[str]:
     return rules.get(clean.casefold())
 
 
+_ENV_KEYS = {"NVIDIA_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"}
+
+
 def _load_local_env() -> None:
     """Load only LLM credentials from a project-local .env file.
 
@@ -106,7 +109,7 @@ def _load_local_env() -> None:
                     continue
                 key, value = line.split("=", 1)
                 key = key.strip()
-                if key == "NVIDIA_API_KEY" and not os.environ.get(key):
+                if key in _ENV_KEYS and not os.environ.get(key):
                     os.environ[key] = value.strip().strip('"').strip("'")
     except FileNotFoundError:
         pass
@@ -114,6 +117,9 @@ def _load_local_env() -> None:
 
 _load_local_env()
 
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "")
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # NVIDIA's documented OpenAI-compatible model identifier. It can be
@@ -210,6 +216,15 @@ def _try_parse_numeric(val_str: str, target_unit: str = "") -> Optional[float]:
     return None
 
 
+def _normalize_value(val: str) -> str:
+    """Uniform LLM value strings: "16-Kbit" -> "16Kbit", "20-year" -> "20 years", micro sign."""
+    v = str(val).strip().replace("μ", "µ")
+    v = re.sub(r"(\d)\s*-\s*([KMG])\s*-?\s*(bit|byte)s?\b",
+               lambda m: f"{m.group(1)}{m.group(2).upper()}{m.group(3).lower()}", v, flags=re.I)
+    v = re.sub(r"(\d)\s*-\s*years?\b", r"\1 years", v, flags=re.I)
+    return re.sub(r"\bVRMS\b", "Vrms", v)
+
+
 def _validate_spec(spec_name: str, spec_value: str) -> Tuple[bool, Optional[str]]:
     """
     Validate extracted spec against sanity checks.
@@ -253,8 +268,7 @@ def _fill_missing_specs_with_regex(category: str, specs: Dict, datasheet_text: s
         parser = DatasheetParser()
 
         # Parse as pages (simple split for now)
-        page_texts = datasheet_text.split("\n\n")
-        regex_specs = parser.extract_specs(page_texts, category=category)
+        regex_specs = parser.extract_specs([datasheet_text], category=category)
 
         # Add specs that LLM missed
         for spec_name, value in regex_specs.items():
@@ -272,39 +286,38 @@ def _fill_missing_specs_with_regex(category: str, specs: Dict, datasheet_text: s
     return specs
 
 
-def download_pdf(url, mpn, download_dir="downloads/datasheets"):
-    """Download a datasheet. Handles LCSC HTML wrappers by extracting real PDF URL."""
+def download_pdf(url, mpn, download_dir="downloads/datasheets", return_url=False):
+    """Download a datasheet. Handles protocol-relative URLs, DigiKey prefixes, and LCSC HTML wrappers."""
+    def _fail():
+        return (None, None, None) if return_url else (None, None)
+
+    def _ok(path, final_url):
+        return (path, "pdf", final_url) if return_url else (path, "pdf")
+
     if not url or not REQUESTS_OK:
-        return None, None
+        return _fail()
+
+    url = url.strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("https://www.digikey.com//"):
+        url = "https://" + url[len("https://www.digikey.com//"):]
+    elif not url.startswith("http://") and not url.startswith("https://"):
+        return _fail()
+
     os.makedirs(download_dir, exist_ok=True)
     safe = re.sub(r"[^\w\-.]", "_", mpn)
-
     pdf_path = os.path.join(download_dir, safe + ".pdf")
-    html_path = os.path.join(download_dir, safe + ".html")
 
-    # Check for cached files
-    if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 5000:
+    # Check for valid cached file
+    if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000:
         with open(pdf_path, "rb") as f:
             if f.read(5) == b"%PDF-":
                 if _is_valid_datasheet(pdf_path, mpn):
-                    return pdf_path, "pdf"
+                    return _ok(pdf_path, url)
                 log.warning("  Removing invalid cached datasheet: %s", pdf_path)
         try:
             os.remove(pdf_path)
-        except OSError:
-            pass
-
-    if os.path.exists(html_path) and os.path.getsize(html_path) > 1000:
-        with open(html_path, "r", encoding="utf-8", errors="replace") as handle:
-            cached_html = handle.read()
-        cached_pdf = _download_embedded_pdf(cached_html, pdf_path, mpn)
-        if cached_pdf:
-            return cached_pdf, "pdf"
-        if len(extract_html_text(cached_html)) >= 100:
-            return html_path, "html"
-        log.warning("  Removing unusable cached HTML: %s", html_path)
-        try:
-            os.remove(html_path)
         except OSError:
             pass
 
@@ -312,7 +325,7 @@ def download_pdf(url, mpn, download_dir="downloads/datasheets"):
         resp = requests.get(url, timeout=30, verify=False,
                             headers={"User-Agent": "Mozilla/5.0"})
         if resp.status_code != 200:
-            return None, None
+            return _fail()
 
         content = resp.content
 
@@ -322,16 +335,18 @@ def download_pdf(url, mpn, download_dir="downloads/datasheets"):
                 f.write(content)
             if not _is_valid_datasheet(pdf_path, mpn):
                 log.warning("  Rejecting non-datasheet PDF for %s: %s", mpn, url)
-                os.remove(pdf_path)
-                return None, None
+                try:
+                    os.remove(pdf_path)
+                except OSError:
+                    pass
+                return _fail()
             log.info("  Downloaded %s.pdf (%d KB)", safe, len(content) // 1024)
-            return pdf_path, "pdf"
+            return _ok(pdf_path, url)
 
         # It's HTML — try to extract the real PDF URL from LCSC wrapper
         if b"<!doctype" in content[:50].lower() or b"<html" in content[:50].lower():
             text = content.decode("utf-8", errors="replace")
 
-            # LCSC embeds the real PDF URL in the page
             real_pdf_patterns = [
                 r'(https?://wmsc\.lcsc\.com/[^"\']+\.pdf)',
                 r'"pdfUrl"\s*:\s*"(https?://[^"]+\.pdf)"',
@@ -340,10 +355,10 @@ def download_pdf(url, mpn, download_dir="downloads/datasheets"):
             ]
 
             for pattern in real_pdf_patterns:
-                match = re.search(pattern, text)
-                if match:
+                for match in re.finditer(pattern, text):
                     real_url = match.group(1)
-                    log.info("  Found real PDF URL: %s", real_url[:70])
+                    if any(skip in real_url.lower() for skip in ["privacy", "terms", "cookie"]):
+                        continue
                     try:
                         pdf_resp = requests.get(real_url, timeout=30, verify=False,
                                                 headers={"User-Agent": "Mozilla/5.0"})
@@ -351,109 +366,94 @@ def download_pdf(url, mpn, download_dir="downloads/datasheets"):
                             with open(pdf_path, "wb") as f:
                                 f.write(pdf_resp.content)
                             if not _is_valid_datasheet(pdf_path, mpn):
-                                os.remove(pdf_path)
+                                try:
+                                    os.remove(pdf_path)
+                                except OSError:
+                                    pass
                                 continue
-                            log.info("  Downloaded real PDF (%d KB)", len(pdf_resp.content) // 1024)
-                            return pdf_path, "pdf"
+                            log.info("  Downloaded real PDF from embedded link (%d KB)", len(pdf_resp.content) // 1024)
+                            return _ok(pdf_path, real_url)
                     except Exception:
                         pass
 
-            # Embedded PDFs existed but were not for this MPN. Do not feed
-            # the wrapper page to the LLM; the caller must find another URL.
             log.warning("  No matching datasheet PDF found in HTML for %s", mpn)
-            return None, None
+            return _fail()
 
-        # Unknown content type
-        with open(pdf_path, "wb") as f:
-            f.write(content)
-        return pdf_path, "pdf"
+        # Non-PDF and non-HTML content rejected
+        log.warning("  Rejecting non-PDF content for %s: %s", mpn, url)
+        return _fail()
 
     except Exception as exc:
         log.debug("Download failed %s: %s", mpn, exc)
-        return None, None
-
-
-def _download_embedded_pdf(html_text, pdf_path, mpn):
-    """Resolve and validate a PDF URL embedded in a cached HTML wrapper."""
-    patterns = [
-        r'(https?://wmsc\.lcsc\.com/[^"\']+\.pdf)',
-        r'"pdfUrl"\s*:\s*"(https?://[^"]+\.pdf)"',
-        r'src="(https?://[^"\']+\.pdf[^"\']*)"',
-        r'href="(https?://[^"\']+\.pdf[^"\']*)"',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, html_text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            response = requests.get(
-                match.group(1), timeout=30, verify=False,
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            if response.status_code == 200 and response.content[:5] == b"%PDF-":
-                with open(pdf_path, "wb") as handle:
-                    handle.write(response.content)
-                if _is_valid_datasheet(pdf_path, mpn):
-                    log.info("  Resolved cached HTML to validated PDF for %s", mpn)
-                    return pdf_path
-                os.remove(pdf_path)
-        except Exception as exc:
-            log.debug("Embedded PDF resolution failed for %s: %s", mpn, exc)
-    return None
+        return _fail()
 
 
 def _is_valid_datasheet(pdf_path, mpn):
-    """Reject compliance sheets, cover pages, and empty/scanned PDFs."""
+    """Reject compliance sheets, cover pages, and empty/scanned/unrelated PDFs."""
     if not PYMUPDF_OK:
-        return True
+        return False
     try:
         doc = fitz.open(pdf_path)
-        text = "\n".join(page.get_text() for page in doc)
         pages = len(doc)
+        text = "\n".join(page.get_text() for page in doc)
         doc.close()
     except Exception:
         return False
 
+    text_len = len(text.strip())
+    if text_len < 500:
+        log.warning("  Invalid datasheet for %s: readable text too short (%d chars)", mpn, text_len)
+        return False
+
     normalized = re.sub(r"[^a-z0-9]+", " ", text.lower())
-    raw_tokens = [token for token in re.findall(r"[a-z0-9]+", mpn.lower()) if len(token) >= 3]
-    mpn_tokens = set()
-    if raw_tokens:
-        # Use only the first MPN token; later tokens are often package suffixes.
-        family = raw_tokens[0]
-        mpn_tokens.add(family)
-        core = re.match(r"[a-z]+[0-9]+", family)
-        if core:
-            mpn_tokens.add(core.group(0))
-        for suffix in ("k", "a", "b", "c"):
-            if family.endswith(suffix) and len(family) > len(suffix) + 3:
-                mpn_tokens.add(family[:-1])
-    has_mpn = any(token in normalized for token in mpn_tokens)
+    compact = re.sub(r"[^a-z0-9]+", "", text.lower())
+    mpn_compact = re.sub(r"[^a-z0-9]+", "", (mpn or "").lower())
+    core_match = re.match(r"[a-z]+\d+", mpn_compact)
+    core = core_match.group(0) if core_match else mpn_compact
+
+    has_identity = bool(
+        mpn_compact
+        and (
+            mpn_compact in compact
+            or (len(core) >= 4 and core in compact)
+            or any(
+                re.search(r"\b" + re.escape(tok) + r"\b", normalized)
+                for tok in re.findall(r"[a-z0-9]+", (mpn or "").lower())
+                if len(tok) >= 4
+            )
+        )
+    )
+
     compliance_only = any(term in normalized for term in (
         "environmental compliance statement",
         "material declaration",
         "rohs declaration",
         "reach declaration",
+        "conflict minerals",
+        "certificate of compliance",
     )) and not any(term in normalized for term in (
         "electrical characteristics", "absolute maximum", "pin configuration",
         "application circuit", "block diagram", "output voltage",
     ))
+
     electrical_terms = sum(normalized.count(term) for term in (
         "electrical characteristics", "absolute maximum", "input voltage",
         "output voltage", "operating temperature", "pin configuration",
         "application circuit", "typical characteristics", "ordering information",
+        "quiescent current", "dropout voltage", "pinout", "block diagram",
     ))
+
     valid = (
         pages >= 1
-        and len(text) >= 1000
-        and has_mpn
+        and has_identity
         and not compliance_only
-        and electrical_terms >= 1
+        and electrical_terms >= 2
     )
     if not valid:
         log.warning(
-            "  Invalid datasheet candidate %s: pages=%d chars=%d has_mpn=%s "
+            "  Invalid datasheet candidate %s: pages=%d chars=%d has_identity=%s "
             "electrical_terms=%d compliance_only=%s",
-            mpn, pages, len(text), has_mpn, electrical_terms, compliance_only,
+            mpn, pages, text_len, has_identity, electrical_terms, compliance_only,
         )
     return valid
 
@@ -531,6 +531,10 @@ def _get_clients():
         return []
 
     providers = []
+    # Any OpenAI-compatible endpoint (Gemini, Groq, OpenRouter, ...) via LLM_* vars;
+    # NVIDIA NIM stays as the fallback.
+    if LLM_API_KEY and LLM_BASE_URL:
+        providers.append(("llm", LLM_BASE_URL, LLM_API_KEY, LLM_MODEL))
     if NVIDIA_API_KEY:
         providers.append(("nvidia", NVIDIA_BASE_URL, NVIDIA_API_KEY, NVIDIA_MODEL))
 
@@ -540,16 +544,16 @@ def _get_clients():
             kwargs = {
                 "base_url": base_url,
                 "api_key": key,
-                "max_retries": 0,
-                "timeout": 30.0,
+                "max_retries": 3,  # backoff on 429/503 (free tiers spike)
+                "timeout": 120.0,
             }
             if HTTPX_OK:
-                kwargs["http_client"] = httpx.Client(verify=False, timeout=30.0)
+                kwargs["http_client"] = httpx.Client(verify=False, timeout=120.0)
             clients.append((provider, OpenAI(**kwargs), model))
         except Exception as exc:
             log.warning("Failed to create %s client: %s", provider, exc)
     if not clients:
-        log.warning("Set NVIDIA_API_KEY")
+        log.warning("Set LLM_API_KEY + LLM_BASE_URL + LLM_MODEL (or NVIDIA_API_KEY) in .env")
     return clients
 
 
@@ -571,7 +575,7 @@ def extract_with_llm(text, mpn, category="", package=""):
         "Return ONLY valid JSON with no markdown.\n\n"
         "Format:\n"
         '{\n'
-        '  "specs": {"Spec Name": "numeric_value_only", ...},\n'
+        '  "specs": {"Spec Name": "value with unit", ...},\n'
         '  "pins": {"1": {"name": "PIN_NAME", '
         '"function": "power_input|power_output|ground|enable|'
         'feedback|no_connect|signal|other"}, ...}\n'
@@ -583,6 +587,8 @@ def extract_with_llm(text, mpn, category="", package=""):
         "- Pin functions must be one of: power_input, power_output, "
         "ground, enable, feedback, no_connect, signal, other\n"
         "- If a spec is not found, omit it entirely\n"
+        "- If the part number selects a variant (e.g. -3.0 = 3.0 V output, 16 = 16 Kbit), "
+        "report the value for THAT variant\n"
         "- Do NOT guess or hallucinate values not in the text\n"
         "- Do NOT invent specs not explicitly listed"
     )
@@ -602,7 +608,8 @@ def extract_with_llm(text, mpn, category="", package=""):
                 ],
                 "temperature": 0.1,
             }
-            request_args["max_tokens"] = 700
+            request_args["max_tokens"] = 4096  # specs + pin table (+ thinking tokens on reasoning models)
+            request_args["response_format"] = {"type": "json_object"}
 
             response = client.chat.completions.create(**request_args)
 
@@ -624,7 +631,14 @@ def extract_with_llm(text, mpn, category="", package=""):
                 if match:
                     raw = match.group(1).strip()
 
-            data = json.loads(raw)
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                # Tolerate prose around the object ("Here is the JSON: {...}")
+                brace = re.search(r"\{.*\}", raw, re.DOTALL)
+                if not brace:
+                    raise
+                data = json.loads(brace.group(0))
             specs = {}
             for k, v in data.get("specs", {}).items():
                 if v is not None and str(v).strip():
@@ -635,7 +649,7 @@ def extract_with_llm(text, mpn, category="", package=""):
                     if not canonical:
                         log.debug("  Ignored non-rule LLM spec %s for %s", k, category)
                         continue
-                    val_str = str(v).strip()
+                    val_str = _normalize_value(v)
                     is_valid, error_msg = _validate_spec(canonical, val_str)
                     if is_valid:
                         specs[canonical] = val_str
@@ -687,6 +701,7 @@ class LLMDatasheetParser:
             log.warning("  Insufficient text from %s (%s)", mpn, file_type)
             return {}, pinout
 
+        full_text = text  # regex fallback scans the whole document, not the LLM excerpt
         text = _datasheet_context(text, mpn, category)
         log.info("  Extracted %d selected chars from %s (%s)", len(text), mpn, file_type)
         log.info("  --- TEXT PREVIEW for %s ---\n%s\n  --- END PREVIEW ---", mpn, text[:1500])
@@ -703,7 +718,7 @@ class LLMDatasheetParser:
         # Always attempt deterministic extraction for fields missed by the
         # model.  The previous <3 threshold left partly enriched components
         # permanently missing required match fields.
-        specs = _fill_missing_specs_with_regex(category, specs, text)
+        specs = _fill_missing_specs_with_regex(category, specs, full_text)
 
         # Build pinout from LLM output
         if pins:

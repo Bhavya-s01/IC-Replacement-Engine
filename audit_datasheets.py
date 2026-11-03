@@ -66,7 +66,7 @@ def classify_pdf(content, mpn):
         status = "wrong_mpn_document"
     elif compliance_only:
         status = "wrong_compliance_document"
-    elif len(text) < 100:
+    elif len(text.strip()) < 500:
         status = "no_readable_text"
     elif electrical_terms < 2:
         status = "suspicious_no_electrical_content"
@@ -76,7 +76,11 @@ def classify_pdf(content, mpn):
 
 
 def audit_one(row):
-    url = row["datasheet_url"]
+    url = (row["datasheet_url"] or "").strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("https://www.digikey.com//"):
+        url = "https://" + url[len("https://www.digikey.com//"):]
     result = {
         "component_id": row["id"],
         "mpn": row["manufacturer_part_number"],

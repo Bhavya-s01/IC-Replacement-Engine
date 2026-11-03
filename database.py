@@ -1,41 +1,31 @@
 """SQLite database manager for the IC database."""
 
 import sqlite3
-import json
 import logging
 import sys
 import os
-from typing import Dict, List, Optional
 from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from models import Component
 from config import DB_PATH
 
 log = logging.getLogger(__name__)
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS components (
-    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-    digikey_part_number       TEXT,
-    manufacturer_part_number  TEXT,
+    id                        INTEGER PRIMARY KEY,
+    manufacturer_part_number  TEXT NOT NULL UNIQUE,
     manufacturer              TEXT,
     description               TEXT,
     category                  TEXT,
     subcategory               TEXT,
     datasheet_url             TEXT,
     product_url               TEXT,
-    stock                     INTEGER DEFAULT 0,
-    unit_price                REAL    DEFAULT 0.0,
-    price_breaks              TEXT    DEFAULT '[]',
     package                   TEXT,
     mounting_type             TEXT,
-    lifecycle_status          TEXT,
-    source                    TEXT    DEFAULT 'digikey',
-    scraped_at                TEXT,
-    raw_data                  TEXT    DEFAULT '{}',
-    UNIQUE(manufacturer_part_number, source)
+    source                    TEXT DEFAULT 'digikey',
+    scraped_at                TEXT
 );
 
 CREATE TABLE IF NOT EXISTS specifications (
@@ -84,6 +74,8 @@ class Database:
     def _init_db(self):
         conn = self._get_conn()
         conn.executescript(SCHEMA_SQL)
+        from import_template import create_tables  # supply_chain + datasheet_queue
+        create_tables(conn)
         conn.commit()
         log.info("Database initialised at %s", self.db_path)
 
@@ -121,35 +113,24 @@ class Database:
         conn.execute(
             """
             INSERT INTO components (
-                digikey_part_number, manufacturer_part_number,
-                manufacturer, description, category, subcategory,
-                datasheet_url, product_url, stock, unit_price,
-                price_breaks, package, mounting_type,
-                lifecycle_status, source, scraped_at, raw_data
-            ) VALUES (
-                :dk, :mpn, :mfr, :desc, :cat, :subcat,
-                :ds, :url, :stock, :price, :pb, :pkg,
-                :mount, :lc, :src, :ts, :raw
-            )
-            ON CONFLICT(manufacturer_part_number, source) DO UPDATE SET
-                digikey_part_number = excluded.digikey_part_number,
-                manufacturer        = excluded.manufacturer,
-                description         = excluded.description,
-                category            = excluded.category,
-                subcategory         = excluded.subcategory,
-                datasheet_url       = excluded.datasheet_url,
-                product_url         = excluded.product_url,
-                stock               = excluded.stock,
-                unit_price          = excluded.unit_price,
-                price_breaks        = excluded.price_breaks,
-                package             = excluded.package,
-                mounting_type       = excluded.mounting_type,
-                lifecycle_status    = excluded.lifecycle_status,
-                scraped_at          = excluded.scraped_at,
-                raw_data            = excluded.raw_data
+                manufacturer_part_number, manufacturer, description, category,
+                subcategory, datasheet_url, product_url, package, mounting_type,
+                source, scraped_at
+            ) VALUES (:mpn, :mfr, :desc, :cat, :subcat, :ds, :url, :pkg, :mount, :src, :ts)
+            ON CONFLICT(manufacturer_part_number) DO UPDATE SET
+                manufacturer  = excluded.manufacturer,
+                description   = excluded.description,
+                category      = CASE WHEN EXISTS (SELECT 1 FROM supply_chain s
+                                      WHERE upper(s.mpn) = upper(components.manufacturer_part_number))
+                                     THEN components.category ELSE excluded.category END,
+                subcategory   = excluded.subcategory,
+                datasheet_url = COALESCE(NULLIF(excluded.datasheet_url, ''), components.datasheet_url),
+                product_url   = excluded.product_url,
+                package       = excluded.package,
+                mounting_type = excluded.mounting_type,
+                scraped_at    = excluded.scraped_at
             """,
             {
-                "dk": comp.digikey_part_number,
                 "mpn": comp.manufacturer_part_number,
                 "mfr": comp.manufacturer,
                 "desc": comp.description,
@@ -157,20 +138,15 @@ class Database:
                 "subcat": comp.subcategory,
                 "ds": comp.datasheet_url,
                 "url": comp.product_url,
-                "stock": comp.stock,
-                "price": comp.unit_price,
-                "pb": comp.price_breaks_json(),
                 "pkg": comp.package,
                 "mount": comp.mounting_type,
-                "lc": comp.lifecycle_status,
                 "src": comp.source,
                 "ts": comp.scraped_at,
-                "raw": comp.raw_specs_json(),
             },
         )
         row = conn.execute(
-            "SELECT id FROM components WHERE manufacturer_part_number=? AND source=?",
-            (comp.manufacturer_part_number, comp.source),
+            "SELECT id FROM components WHERE manufacturer_part_number=?",
+            (comp.manufacturer_part_number,),
         ).fetchone()
         comp_id = row["id"]
 

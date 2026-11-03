@@ -11,7 +11,6 @@ Run:
 """
 
 import sqlite3
-import os
 import time
 import logging
 import argparse

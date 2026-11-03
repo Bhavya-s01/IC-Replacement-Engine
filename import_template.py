@@ -13,6 +13,7 @@ Run: python import_template.py
 
 import sqlite3
 import os
+import sys
 import re
 import logging
 
@@ -476,11 +477,14 @@ if __name__ == "__main__":
     create_tables(conn)
 
     template_files = []
-    for folder in [".", "templates"]:
-        if os.path.isdir(folder):
-            for f in os.listdir(folder):
-                if f.endswith((".xlsx", ".xls")) and not f.startswith("~"):
-                    template_files.append(os.path.join(folder, f))
+    if len(sys.argv) > 1:  # explicit files (used by the admin upload)
+        template_files = sys.argv[1:]
+    else:
+        for folder in [".", "templates"]:
+            if os.path.isdir(folder):
+                for f in os.listdir(folder):
+                    if f.endswith((".xlsx", ".xls")) and not f.startswith("~"):
+                        template_files.append(os.path.join(folder, f))
 
     if not template_files:
         print("No .xlsx files found in current directory or templates/ folder")
