@@ -23,6 +23,17 @@ const STATUS_STYLE: Record<string, string> = {
 const errMsg = (e: any) =>
   e?.response?.data?.detail ?? (e?.response ? `HTTP ${e.response.status}` : 'Cannot reach backend on localhost:8000')
 
+type Overview = {
+  components: number; with_datasheet_url: number; parts_with_specs: number
+  llm_enriched_parts: number; datasheet_pdfs_on_disk: number; llm_configured: boolean
+  categories: { slug: string; name: string; count: number }[]
+  datasheet_queue: Record<string, number>; supply_chain_mpns: number
+}
+type MpnResult = {
+  received: number; queued: number; requeued: number; already_queued: number
+  already_have_datasheet: number; invalid: string[]; invalid_count: number
+}
+
 function duration(j: Job) {
   const s = Math.round((j.finished_at ?? Date.now() / 1000) - j.started_at)
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`
@@ -38,13 +49,20 @@ export default function AdminApp() {
   const [log, setLog] = useState('')
   const [error, setError] = useState('')
   const [token, setToken] = useState(getAdminToken())
+  const [overview, setOverview] = useState<Overview | null>(null)
+  const [mpnText, setMpnText] = useState('')
+  const [mpnFile, setMpnFile] = useState<File | null>(null)
+  const [mpnCategory, setMpnCategory] = useState('')
+  const [requeue, setRequeue] = useState(false)
+  const [mpnResult, setMpnResult] = useState<MpnResult | null>(null)
+  const [uploading, setUploading] = useState(false)
   const offset = useRef(0)
   const logEnd = useRef<HTMLPreElement>(null)
 
   const load = async () => {
     try {
-      const [t, j] = await Promise.all([adminApi.tasks(), adminApi.jobs()])
-      setTasks(t.data.tasks); setCategories(t.data.categories); setJobs(j.data)
+      const [t, j, o] = await Promise.all([adminApi.tasks(), adminApi.jobs(), adminApi.overview()])
+      setTasks(t.data.tasks); setCategories(t.data.categories); setJobs(j.data); setOverview(o.data)
       setTaskKey(k => k || Object.keys(t.data.tasks)[0])
       setError('')
     } catch (e) { setError(errMsg(e)) }
@@ -61,6 +79,12 @@ export default function AdminApp() {
 
   // Poll jobs list + the selected job's log while anything is running
   const anyRunning = jobs.some(j => j.status === 'running')
+  // Refresh DB stats when a job finishes
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    if (wasRunning.current && !anyRunning) adminApi.overview().then(o => setOverview(o.data)).catch(() => {})
+    wasRunning.current = anyRunning
+  }, [anyRunning])
   useEffect(() => {
     if (!anyRunning && !selected) return
     const id = setInterval(async () => {
@@ -84,6 +108,27 @@ export default function AdminApp() {
       const { data } = await adminApi.startJob(taskKey, values)
       setError(''); await load(); openJob(data.id)
     } catch (e) { setError(errMsg(e)) }
+  }
+  const submitMpns = async () => {
+    const form = new FormData()
+    form.append('text', mpnText); form.append('category', mpnCategory)
+    form.append('requeue', String(requeue))
+    if (mpnFile) form.append('file', mpnFile)
+    setUploading(true); setMpnResult(null)
+    try {
+      const { data } = await adminApi.uploadMpns(form)
+      setMpnResult(data); setError(''); setMpnText(''); setMpnFile(null)
+      adminApi.overview().then(o => setOverview(o.data)).catch(() => {})
+    } catch (e) { setError(errMsg(e)) }
+    setUploading(false)
+  }
+  const submitTemplate = async (file: File) => {
+    setUploading(true)
+    try {
+      const { data } = await adminApi.uploadSupplyChain(file)
+      setError(''); await load(); openJob(data.id)
+    } catch (e) { setError(errMsg(e)) }
+    setUploading(false)
   }
   const cancel = async (id: string) => {
     try { await adminApi.cancelJob(id); await load() } catch (e) { setError(errMsg(e)) }
@@ -112,8 +157,96 @@ export default function AdminApp() {
       <main className="max-w-6xl mx-auto p-6 grid gap-6 lg:grid-cols-[360px_1fr]">
         {error && <div className="lg:col-span-2 bg-red-50 text-red-700 border border-red-200 rounded px-4 py-2 text-sm">{error}</div>}
 
+        {overview && (
+          <section className="lg:col-span-2 bg-white border border-slate-200 rounded-lg p-4">
+            <h2 className="font-medium mb-3">Database</h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+              {([
+                ['Components', overview.components],
+                ['With datasheet URL', overview.with_datasheet_url],
+                ['With specs', overview.parts_with_specs],
+                ['LLM-enriched', overview.llm_enriched_parts],
+                ['PDFs on disk', overview.datasheet_pdfs_on_disk],
+                ['Supply-chain MPNs', overview.supply_chain_mpns],
+                ['Awaiting datasheet', overview.datasheet_queue.pending ?? 0],
+              ] as [string, number][]).map(([label, n]) => (
+                <div key={label} className="bg-slate-50 rounded p-3">
+                  <div className="text-xs text-slate-500">{label}</div>
+                  <div className="text-lg font-medium">{n.toLocaleString()}</div>
+                  {!['Components', 'Supply-chain MPNs', 'Awaiting datasheet'].includes(label) && overview.components > 0 && (
+                    <div className="text-xs text-slate-400">{Math.round(n * 100 / overview.components)}%</div>)}
+                </div>))}
+            </div>
+            {!overview.llm_configured && (
+              <p className="mt-3 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+                No LLM API key set on the backend — enrichment tasks that use the LLM will fail.
+              </p>)}
+            <details className="mt-3 text-sm">
+              <summary className="cursor-pointer text-slate-500">Parts per category</summary>
+              <ul className="mt-2 grid sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1">
+                {overview.categories.map(c => (
+                  <li key={c.slug} className="flex justify-between border-b border-slate-100">
+                    <span>{c.name}</span><span className="text-slate-500">{c.count.toLocaleString()}</span>
+                  </li>))}
+              </ul>
+            </details>
+          </section>)}
+
+        <section className="lg:col-span-2 grid gap-6 md:grid-cols-2">
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <h2 className="font-medium mb-1">Update supply-chain data</h2>
+            <p className="text-xs text-slate-500 mb-3">
+              Upload an ODM golden template (.xlsx). It is imported into the supply-chain table;
+              new MPNs are queued for datasheet lookup.
+            </p>
+            <input type="file" accept=".xlsx,.xls" disabled={uploading || anyRunning}
+              onChange={e => { const f = e.target.files?.[0]; if (f) submitTemplate(f); e.target.value = '' }}
+              className="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-[#0076CE] file:text-white file:px-3 file:py-1.5 disabled:opacity-50" />
+            {anyRunning && <p className="text-xs text-amber-700 mt-2">Wait for the running job to finish.</p>}
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <h2 className="font-medium mb-1">Add new IC part numbers</h2>
+            <p className="text-xs text-slate-500 mb-2">
+              Paste MPNs (comma/space/line separated) and/or upload a .txt/.csv/.xlsx. They are queued for the datasheet fetcher.
+            </p>
+            <textarea value={mpnText} onChange={e => setMpnText(e.target.value)} rows={3} placeholder="LM1117-3.3, TPS62130RGTR, …"
+              className="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono" />
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
+              <input type="file" accept=".txt,.csv,.xlsx,.xls" onChange={e => setMpnFile(e.target.files?.[0] ?? null)} className="text-xs max-w-[14rem]" />
+              <select value={mpnCategory} onChange={e => setMpnCategory(e.target.value)} className="border border-slate-300 rounded px-2 py-1">
+                <option value="">Category: auto</option>
+                {Object.entries(categories).map(([s, n]) => <option key={s} value={s}>{n}</option>)}
+              </select>
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                <input type="checkbox" checked={requeue} onChange={e => setRequeue(e.target.checked)} /> Retry previously not-found
+              </label>
+              <button onClick={submitMpns} disabled={uploading || (!mpnText.trim() && !mpnFile)}
+                className="ml-auto bg-[#0076CE] text-white rounded px-3 py-1.5 disabled:opacity-50">Queue</button>
+            </div>
+            {mpnResult && (
+              <div className="mt-3 text-xs bg-emerald-50 text-emerald-800 rounded px-3 py-2 space-y-1">
+                <p>{mpnResult.queued} queued{mpnResult.requeued ? `, ${mpnResult.requeued} re-queued` : ''} of {mpnResult.received} unique MPNs
+                  ({mpnResult.already_queued} already queued, {mpnResult.already_have_datasheet} already have a datasheet).</p>
+                {mpnResult.invalid_count > 0 && (
+                  <p className="text-amber-700">Skipped {mpnResult.invalid_count} invalid: {mpnResult.invalid.join(', ')}{mpnResult.invalid_count > mpnResult.invalid.length ? '…' : ''}</p>)}
+                {mpnResult.queued + mpnResult.requeued > 0 && (
+                  <button onClick={() => { setTaskKey('fetch_datasheets'); window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) }}
+                    className="underline">Next: fetch datasheets →</button>)}
+              </div>)}
+          </div>
+        </section>
+
         <section className="bg-white border border-slate-200 rounded-lg p-4 self-start">
           <h2 className="font-medium mb-3">Run a task</h2>
+          <div className="flex flex-wrap gap-2 mb-3 text-xs">
+            {([['fetch_datasheets', 'Datasheet fetcher'], ['enrich_supply_chain', 'LLM enrichment'], ['scrape', 'Scraper']] as [string, string][])
+              .filter(([k]) => tasks[k]).map(([k, label]) => (
+                <button key={k} onClick={() => setTaskKey(k)}
+                  className={`px-2 py-1 rounded border ${taskKey === k ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+                  {label}
+                </button>))}
+          </div>
           <select value={taskKey} onChange={e => setTaskKey(e.target.value)}
             className="w-full border border-slate-300 rounded px-2 py-1.5 mb-2">
             {Object.entries(tasks).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}

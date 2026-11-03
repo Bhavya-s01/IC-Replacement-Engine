@@ -48,6 +48,13 @@ ADMIN.interceptors.request.use(cfg => {
 
 export const adminApi = {
   tasks: () => ADMIN.get('/tasks'),
+  overview: () => ADMIN.get('/overview'),
+  uploadMpns: (form: FormData) => ADMIN.post('/upload/mpns', form),
+  uploadSupplyChain: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return ADMIN.post('/upload/supply-chain', form)
+  },
   jobs: () => ADMIN.get('/jobs'),
   job: (id: string, offset = 0) => ADMIN.get(`/jobs/${id}`, { params: { offset } }),
   startJob: (task: string, params: Record<string, unknown>) =>
