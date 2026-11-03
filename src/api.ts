@@ -34,3 +34,23 @@ export const api = {
       params: { top_n: topN, min_compat: minCompat },
     }),
 }
+
+const ADMIN_TOKEN_KEY = 'adminToken'
+export const getAdminToken = () => localStorage.getItem(ADMIN_TOKEN_KEY) ?? ''
+export const setAdminToken = (t: string) => localStorage.setItem(ADMIN_TOKEN_KEY, t)
+
+const ADMIN = axios.create({ baseURL: 'http://localhost:8000/api/admin' })
+ADMIN.interceptors.request.use(cfg => {
+  const token = getAdminToken()
+  if (token) cfg.headers['X-Admin-Token'] = token
+  return cfg
+})
+
+export const adminApi = {
+  tasks: () => ADMIN.get('/tasks'),
+  jobs: () => ADMIN.get('/jobs'),
+  job: (id: string, offset = 0) => ADMIN.get(`/jobs/${id}`, { params: { offset } }),
+  startJob: (task: string, params: Record<string, unknown>) =>
+    ADMIN.post('/jobs', { task, params }),
+  cancelJob: (id: string) => ADMIN.post(`/jobs/${id}/cancel`),
+}
